@@ -1,10 +1,10 @@
-# HaxBall Client by og
+# HRN Client — HaxBall para Haxracing
 
-Unofficial client for the browser game [HaxBall](https://www.haxball.com/play), built with [Electron](https://github.com/electron/electron) and shipping with the browser extension [HaxBall All-in-one Tool](https://github.com/xenonsb/Haxball-Room-Extension).
+HRN Client es un cliente de escritorio de HaxBall enfocado en Haxracing. Está basado en [HaxBall Client de og](https://github.com/oghb/haxball-client), y añade herramientas para carreras como un HUD personalizable con velocidad, marchas y vueltas, además de ajustes integrados para el cliente.
+
+Usa [Electron](https://github.com/electron/electron) y se distribuye con la extensión [HaxBall All-in-one Tool](https://github.com/xenonsb/Haxball-Room-Extension).
 
 The client works on **Windows** (64bit/32bit/ARM), **macOS** (Apple Silicon/Intel), and **Linux** (64bit).
-
-We are also on **[Discord](https://discord.gg/zDzYamtcfX)**!
 
 ✨ **Features at a glance:**
 
@@ -15,13 +15,16 @@ We are also on **[Discord](https://discord.gg/zDzYamtcfX)**!
 * Favorite rooms
 * Haxracing room tags and a dedicated room-list filter
 * Chat shortcuts
-* Automatic updates
 * Glass UI (if enabled)
 * Easy Auth management
 
+## Descarga para Windows
+
+Descarga el instalador x64 desde [Releases de HRN Client](https://github.com/nanoseb12/HRN-Client/releases). El archivo también está disponible en la carpeta `dist` de este repositorio.
+
 ## How to install and run
 
-Download from the [main website](https://oghb.github.io/haxball-client/) or from the [Releases](https://github.com/oghb/haxball-client/releases) page the latest version for your OS.
+Las compilaciones para macOS y Linux todavía no están publicadas. Las instrucciones que siguen describen el proceso heredado del proyecto base y pueden requerir ajustes para HRN Client.
 
 Then
 
@@ -36,7 +39,7 @@ Then
 * the app doesn't restart automatically on Windows
 * if a room set to favorite changes name or no longer exists, there is no way to remove it and hide it from the Profile page
 
-If a bug you found isn't here, [open an issue](https://github.com/oghb/haxball-client/issues)!
+If a bug you found isn't here, [open an issue](https://github.com/nanoseb12/HRN-Client/issues)!
 
 ## Features in detail
 
