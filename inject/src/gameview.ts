@@ -2,7 +2,6 @@ import { waitForElement } from "./waitForElement";
 import { openSettingsAlert } from "./settings";
 import { emojiShortcuts } from "./emojis";
 import { appendHudSettingsPanel, setupRacingHud } from "./hud";
-import { applyLowEffectsMode } from "./optimization";
 
 const addShortcutListener = async (gameframe: HTMLIFrameElement): Promise<void> => {
 	const chatInput = gameframe.contentDocument.querySelector('[data-hook="input"]') as HTMLInputElement;
@@ -72,6 +71,26 @@ const extendHaxballSettingsMenu = (gameframe: HTMLIFrameElement): void => {
 		const customPanel = doc.createElement("div");
 		customPanel.className = "section selected haxracing-settings-panel";
 		customPanel.style.cssText = "display:none;max-height:55vh;min-height:230px;overflow:auto;padding:10px 12px;box-sizing:border-box;color:#edf4f5;";
+		if (!doc.getElementById("hrn-settings-control-sizing")) {
+			const controlSizing = doc.createElement("style");
+			controlSizing.id = "hrn-settings-control-sizing";
+			controlSizing.textContent = `
+				.haxracing-settings-panel select,
+				.haxracing-settings-panel button,
+				.haxracing-settings-panel input:not([type="range"]):not([type="checkbox"]) {
+					box-sizing: border-box !important;
+					height: 36px !important;
+					min-height: 36px !important;
+					line-height: 20px !important;
+				}
+				.haxracing-settings-panel select,
+				.haxracing-settings-panel input:not([type="range"]):not([type="checkbox"]) {
+					padding-top: 6px !important;
+					padding-bottom: 6px !important;
+				}
+			`;
+			doc.head?.appendChild(controlSizing);
+		}
 		const hudPanel = doc.createElement("div");
 		const clientPanel = doc.createElement("div");
 		const optimizationPanel = doc.createElement("div");
@@ -304,8 +323,6 @@ export const setGameView = async (): Promise<void> => {
 		return;
 	}
 	extendHaxballSettingsMenu(gameframe);
-	const prefs = await window.electronAPI.getAppPreferences();
-	applyLowEffectsMode(prefs["low_effects"] === true);
 	// Mount the HUD first so optional HaxBall UI tweaks cannot prevent it from appearing.
 	await setupRacingHud();
 	addShortcutListener(gameframe);

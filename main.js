@@ -41,7 +41,6 @@ const validatePreferences = (prefs) => {
       })), 
       transp_ui: z.boolean(),
       language: z.enum(['en', 'es', 'pt']).optional(),
-      low_effects: z.boolean().optional(),
       shortcuts: z.array(z.tuple([z.string(), z.string()])),
       profiles: z.array(ProfileSchema),
       discord_rpc: z.boolean().optional(),
