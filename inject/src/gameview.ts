@@ -37,11 +37,17 @@ const extendHaxballSettingsMenu = (gameframe: HTMLIFrameElement): void => {
 	const mountTabs = (): void => {
 		const allTabs = Array.from(doc.querySelectorAll<HTMLButtonElement>("button"));
 		const labelOf = (button: HTMLButtonElement): string => (button.innerText || button.textContent || "").replace(/\s+/g, " ").trim().toLowerCase();
-		const soundTab = allTabs.find(button => labelOf(button) === "sound");
+		const nativeTabLabels: Record<string, string[]> = {
+			sound: ["sound", "sonido", "som"],
+			video: ["video", "vídeo"],
+			input: ["input", "controles"],
+			misc: ["misc", "varios", "outros"],
+		};
+		const soundTab = allTabs.find(button => nativeTabLabels.sound.includes(labelOf(button)));
 		if (!soundTab?.parentElement) return;
 		const tabBar = soundTab.parentElement;
 		const nativeTabs = Array.from(tabBar.querySelectorAll<HTMLButtonElement>("button"))
-			.filter(button => ["sound", "video", "input", "misc"].includes(labelOf(button)));
+			.filter(button => Object.values(nativeTabLabels).some(labels => labels.includes(labelOf(button))));
 		if (!tabBar || nativeTabs.length < 4) return;
 		const dialog = (soundTab.closest(".dialog") as HTMLElement | null)
 			|| (tabBar.parentElement?.parentElement as HTMLElement | null)
@@ -142,7 +148,7 @@ export const openUnifiedHaxballSettings = (): boolean => {
 	const doc = gameframe?.contentDocument;
 	if (!doc) return false;
 	const settingsDialogOpen = Array.from(doc.querySelectorAll<HTMLElement>(".dialog"))
-		.some(dialog => dialog.getClientRects().length > 0 && /\bSettings\b/i.test(dialog.textContent || ""));
+		.some(dialog => dialog.getClientRects().length > 0 && /\b(settings|ajustes|configurações|configuración)\b/i.test(dialog.textContent || ""));
 	if (settingsDialogOpen) return true;
 	const settingsButton = doc.querySelector<HTMLButtonElement>('[data-hook="settings"]');
 	if (!settingsButton) return false;

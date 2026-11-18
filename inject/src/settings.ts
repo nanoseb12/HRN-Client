@@ -4,6 +4,7 @@ import { loadProfileToLocalStorage } from "./profiles";
 import { shortcutListDialog, shortcutNewDialog } from "./shortcuts";
 import { createButton } from "./utils";
 import { appendHudSettingsPanel } from "./hud";
+import { AppLanguage, getLocalizationLanguage, setLocalizationLanguage } from "./i18n";
 
 const createToggleRow = (
 		labelText: string,
@@ -125,6 +126,30 @@ export const resetPreferencesAlert = (): void => {
 
 
 type EmbeddedSettingsPanels = { client: HTMLElement; optimization: HTMLElement };
+
+const createLanguageSection = (doc: Document): HTMLElement => {
+	const section = doc.createElement("section");
+	section.style.cssText = "display:grid;gap:7px;margin-bottom:12px;";
+	const heading = doc.createElement("div");
+	heading.textContent = "Idioma";
+	heading.style.cssText = "font-size:18px;font-weight:bold;";
+	const description = doc.createElement("div");
+	description.textContent = "Idioma del cliente y de HaxBall";
+	description.style.cssText = "font-size:13px;color:#aab9c4;";
+	const select = doc.createElement("select");
+	select.style.cssText = "padding:8px;border-radius:5px;border:1px solid #34534d;background:#10191e;color:white;";
+	const languages: Array<[AppLanguage, string]> = [["en", "English"], ["es", "Español"], ["pt", "Português"]];
+	languages.forEach(([value, label]) => {
+		const option = doc.createElement("option");
+		option.value = value;
+		option.textContent = label;
+		option.selected = value === getLocalizationLanguage();
+		select.appendChild(option);
+	});
+	select.addEventListener("change", () => { void setLocalizationLanguage(select.value as AppLanguage); });
+	section.append(heading, description, select);
+	return section;
+};
 
 export const openSettingsAlert = async (embeddedPanels?: EmbeddedSettingsPanels): Promise<void> => {
 	const prefs = await window.electronAPI.getAppPreferences();
@@ -374,11 +399,13 @@ export const openSettingsAlert = async (embeddedPanels?: EmbeddedSettingsPanels)
 	container.style.maxHeight = '70vh';
 	container.style.overflowY = 'auto';
 	container.style.paddingRight = '8px';
+	const languageSection = createLanguageSection(embeddedPanels?.client.ownerDocument || document);
 	if (embeddedPanels) {
 		embeddedPanels.optimization.append(cameraSection, generalSection);
-		embeddedPanels.client.append(shortcutsSection, authSection, backupSection);
+		embeddedPanels.client.append(languageSection, shortcutsSection, authSection, backupSection);
 		return;
 	}
+	container.appendChild(languageSection);
 	container.appendChild(cameraSection);
 	await appendHudSettingsPanel(container);
 	container.appendChild(generalSection);

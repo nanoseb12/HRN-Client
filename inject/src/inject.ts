@@ -3,9 +3,11 @@ import { waitForElement } from "./waitForElement";
 import { setupUIElements } from "./ui/setupUIElements"
 import { handleGameView } from "./handleview";
 import { exportCurrentProfile, loadProfileToLocalStorage, Profile } from "./profiles";
+import { attachLocalization, initializeLocalization } from "./i18n";
 
 async function init() {    
     // remove ads, modify header, add command bar
+	await initializeLocalization();
 	await setupUIElements();
 
     // load profile
@@ -44,6 +46,8 @@ async function init() {
         await waitForElement("div[class$='view']");
         const gameframe = document.getElementsByClassName("gameframe")[0] as HTMLIFrameElement;
         const frameDocument = gameframe.contentDocument!;
+        attachLocalization(frameDocument);
+        gameframe.addEventListener("load", () => attachLocalization(gameframe.contentDocument));
         let lastRoutedView = "";
         const routeCurrentView = (): void => {
             const selectors = [".game-view", ".room-view", ".roomlist-view", ".dropdown"];

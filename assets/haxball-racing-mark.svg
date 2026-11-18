@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="220" viewBox="0 0 720 220" fill="none">
+  <defs>
+    <linearGradient id="ring" x1="25" y1="20" x2="198" y2="194" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5BE1D0"/>
+      <stop offset="1" stop-color="#D9A95B"/>
+    </linearGradient>
+    <linearGradient id="word" x1="260" y1="55" x2="643" y2="162" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F7F4EA"/>
+      <stop offset="1" stop-color="#B8C7C4"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(12 10)">
+    <circle cx="100" cy="100" r="88" fill="#111A1D" stroke="url(#ring)" stroke-width="8"/>
+    <circle cx="100" cy="100" r="65" stroke="#314346" stroke-width="2" stroke-dasharray="4 8"/>
+    <path d="M43 121c18-39 38-58 66-58 20 0 34 11 48 29" stroke="#5BE1D0" stroke-width="11" stroke-linecap="round"/>
+    <path d="M53 145c21-18 40-27 61-27 15 0 27 4 40 12" stroke="#D9A95B" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="100" cy="100" r="17" fill="#F7F4EA" stroke="#111A1D" stroke-width="5"/>
+    <path d="M147 43v38" stroke="#F7F4EA" stroke-width="4" stroke-linecap="round"/>
+    <path d="M151 46h30v23h-30z" fill="#F7F4EA"/>
+    <path d="M151 46h10v11h-10zm20 11h10v12h-10zm-10 0h10v12h-10zm10-11h10v11h-10z" fill="#172326"/>
+  </g>
+  <text x="225" y="112" fill="url(#word)" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="800" letter-spacing="3">HAXBALL</text>
+  <path d="M229 137h386" stroke="#314346" stroke-width="2"/>
+  <text x="231" y="173" fill="#5BE1D0" font-family="Arial, Helvetica, sans-serif" font-size="20" font-weight="700" letter-spacing="8">RACING SERIES</text>
+</svg>

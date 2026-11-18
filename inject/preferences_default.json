@@ -2,7 +2,25 @@
 	"fps_unlock": false,
 	"notes": [],
 	"transp_ui": false,
+	"language": "es",
 	"camera_zoom": 1,
+	"hud": {
+	  "showLastLap": true,
+	  "showLapCount": true,
+	  "showSpeed": true,
+	  "showGear": true,
+	  "showKeyIndicator": true,
+	  "speedMultiplier": 1,
+	  "maxSpeedKmh": 300,
+	  "gearPercentages": [18, 35, 53, 72, 88, 100],
+	  "dashboardStyle": "normal",
+	  "scoreboardStyle": "haxball",
+	  "scoreboardPosition": "default",
+	  "keyLayout": "wasd",
+	  "keyPosition": "default",
+	  "left": 24,
+	  "top": 72
+	},
 	"shortcuts": [
 	  ["/e", "/extrapolation "],
 	  ["/a", "/avatar "]
