@@ -2,6 +2,7 @@ import { waitForElement } from "./waitForElement";
 import { openSettingsAlert } from "./settings";
 import { emojiShortcuts } from "./emojis";
 import { appendHudSettingsPanel, setupRacingHud } from "./hud";
+import { applyLowEffectsMode } from "./optimization";
 
 const addShortcutListener = async (gameframe: HTMLIFrameElement): Promise<void> => {
 	const chatInput = gameframe.contentDocument.querySelector('[data-hook="input"]') as HTMLInputElement;
@@ -156,6 +157,19 @@ export const openUnifiedHaxballSettings = (): boolean => {
 	return true;
 };
 
+export const openHaxballVideoSettings = (): void => {
+	if (!openUnifiedHaxballSettings()) return;
+	window.setTimeout(() => {
+		const gameframe = document.getElementsByClassName("gameframe")[0] as HTMLIFrameElement | undefined;
+		const doc = gameframe?.contentDocument;
+		if (!doc) return;
+		const videoLabels = ["video", "vídeo"];
+		const videoTab = Array.from(doc.querySelectorAll<HTMLButtonElement>(".dialog button"))
+			.find(button => videoLabels.includes((button.innerText || button.textContent || "").trim().toLowerCase()));
+		videoTab?.click();
+	}, 100);
+};
+
 export const toggleTransparentUI = async (): Promise<void> => {
     const gameframe = document.getElementsByClassName("gameframe")[0] as HTMLIFrameElement;
 	if (!gameframe?.contentDocument) {
@@ -290,6 +304,8 @@ export const setGameView = async (): Promise<void> => {
 		return;
 	}
 	extendHaxballSettingsMenu(gameframe);
+	const prefs = await window.electronAPI.getAppPreferences();
+	applyLowEffectsMode(prefs["low_effects"] === true);
 	// Mount the HUD first so optional HaxBall UI tweaks cannot prevent it from appearing.
 	await setupRacingHud();
 	addShortcutListener(gameframe);

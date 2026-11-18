@@ -5,6 +5,8 @@ import { shortcutListDialog, shortcutNewDialog } from "./shortcuts";
 import { createButton } from "./utils";
 import { appendHudSettingsPanel } from "./hud";
 import { AppLanguage, getLocalizationLanguage, setLocalizationLanguage } from "./i18n";
+import { applyLowEffectsMode } from "./optimization";
+import { openHaxballVideoSettings } from "./gameview";
 
 const createToggleRow = (
 		labelText: string,
@@ -210,10 +212,56 @@ export const openSettingsAlert = async (embeddedPanels?: EmbeddedSettingsPanels)
 	generalHeader.style.marginBottom = '10px';
 
 	const generalNote = document.createElement('div');
-	generalNote.textContent = "Reinicia el cliente para aplicar cambios de rendimiento.";
+	generalNote.textContent = "Reinicia el cliente para aplicar cambios del límite de FPS.";
 	generalNote.style.fontSize = '13px';
 	generalNote.style.marginBottom = '15px';
 	generalNote.style.color = '#ccc';
+
+	const profileRow = document.createElement("div");
+	profileRow.style.cssText = "display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:15px;";
+	const profileLabel = document.createElement("div");
+	profileLabel.textContent = "Perfil de optimización";
+	profileLabel.style.cssText = "font-weight:bold;flex:0 0 180px;";
+	const profileSelect = document.createElement("select");
+	profileSelect.style.cssText = "flex:1;min-width:180px;padding:8px;border-radius:5px;border:1px solid #34534d;background:#10191e;color:white;";
+	const profileOptions = [
+		["balanced", "Equilibrado"],
+		["smooth", "Máxima fluidez"],
+		["economy", "Menos efectos"],
+		["custom", "Personalizado"],
+	] as const;
+	const initialFpsUnlock = prefs["fps_unlock"] === true;
+	const initialLowEffects = prefs["low_effects"] === true;
+	const initialProfile = initialFpsUnlock && initialLowEffects ? "smooth"
+		: initialFpsUnlock || initialLowEffects ? "custom" : "balanced";
+	profileOptions.forEach(([value, label]) => {
+		const option = document.createElement("option");
+		option.value = value;
+		option.textContent = label;
+		option.selected = value === initialProfile;
+		profileSelect.appendChild(option);
+	});
+	profileSelect.addEventListener("change", () => {
+		if (profileSelect.value === "custom") return;
+		const fpsUnlock = profileSelect.value === "smooth";
+		const lowEffects = profileSelect.value !== "balanced";
+		void window.electronAPI.setAppPreference("fps_unlock", fpsUnlock);
+		void window.electronAPI.setAppPreference("low_effects", lowEffects);
+		applyLowEffectsMode(lowEffects);
+		fpsButtons.forEach((button, index) => {
+			const active = index === (fpsUnlock ? 1 : 0);
+			button.dataset.active = active ? "true" : "false";
+			button.style.backgroundColor = active ? "#244967" : "#1b2125";
+			button.style.color = active ? "white" : "#aaa";
+		});
+		effectsButtons.forEach((button, index) => {
+			const active = index === (lowEffects ? 1 : 0);
+			button.dataset.active = active ? "true" : "false";
+			button.style.backgroundColor = active ? "#244967" : "#1b2125";
+			button.style.color = active ? "white" : "#aaa";
+		});
+	});
+	profileRow.append(profileLabel, profileSelect);
 
 	const currentFpsSetting = prefs["fps_unlock"] ? "Sin límite" : "Normal";
 	const fpsRow = createToggleRow(
@@ -223,8 +271,29 @@ export const openSettingsAlert = async (embeddedPanels?: EmbeddedSettingsPanels)
 		(selected) => {
 			const newFpsSetting = (selected === "Normal") ? false : true;
 			window.electronAPI.setAppPreference("fps_unlock", newFpsSetting);
+			profileSelect.value = "custom";
 		}
 	);
+	const fpsButtons = Array.from(fpsRow.querySelectorAll<HTMLButtonElement>("button"));
+
+	const currentEffectsSetting = prefs["low_effects"] === true ? "Reducidos" : "Normales";
+	const effectsRow = createToggleRow(
+		"Efectos visuales",
+		["Normales", "Reducidos"],
+		currentEffectsSetting,
+		(selected) => {
+			const enabled = selected === "Reducidos";
+			void window.electronAPI.setAppPreference("low_effects", enabled);
+			applyLowEffectsMode(enabled);
+			profileSelect.value = "custom";
+		}
+	);
+	const effectsButtons = Array.from(effectsRow.querySelectorAll<HTMLButtonElement>("button"));
+
+	const lowLatencyMessage = document.createElement("div");
+	lowLatencyMessage.textContent = "La baja latencia y Mostrar FPS se configuran en la pestaña Video de HaxBall.";
+	lowLatencyMessage.style.cssText = "font-size:13px;line-height:1.4;color:#aab9c4;margin:2px 0 8px;";
+	const openVideoSettingsButton = createButton("Abrir ajustes de Video", "#155e57", "#21786e", openHaxballVideoSettings);
 
 	// because discord_rpc was introduced after 0.4.0
 	// here we just make sure that if preferences.json doesn't have discord_rpc
@@ -245,7 +314,11 @@ export const openSettingsAlert = async (embeddedPanels?: EmbeddedSettingsPanels)
 
 	generalSection.appendChild(generalHeader);
 	generalSection.appendChild(generalNote);
+	generalSection.appendChild(profileRow);
 	generalSection.appendChild(fpsRow);
+	generalSection.appendChild(effectsRow);
+	generalSection.appendChild(lowLatencyMessage);
+	generalSection.appendChild(openVideoSettingsButton);
 	generalSection.appendChild(discordRPCRow);
 	generalSection.appendChild(createDivider());
 
