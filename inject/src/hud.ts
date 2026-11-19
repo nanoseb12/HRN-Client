@@ -47,6 +47,8 @@ const DEFAULT_CONFIG: HudConfig = {
     top: 72,
 };
 let speedPoller: number | null = null;
+let startLightsPoller: number | null = null;
+let startLightsStopObserver: MutationObserver | null = null;
 let readCanvasSpeed: () => number | null = () => null;
 const hookedCanvasPrototypes = new WeakSet<object>();
 const originalScoreboardStyles = new WeakMap<HTMLElement, string>();
@@ -107,14 +109,25 @@ const readBallPosition = (gameframe: HTMLIFrameElement): { x: number; y: number 
     for (const context of contexts) {
         const bridge = (context as any).g;
         try {
-            const ball = typeof bridge?.getBallPosition === "function"
-                ? bridge.getBallPosition()
-                : typeof bridge?.getDiscProperties === "function" ? bridge.getDiscProperties(0) : null;
-            if (Number.isFinite(ball?.x) && Number.isFinite(ball?.y)) return { x: ball.x, y: ball.y };
+            const room = bridge?.getRoomManager?.()?.room;
+            const getters = [
+                () => bridge?.getBallPosition?.(),
+                () => bridge?.getDiscProperties?.(0),
+                () => room?.getBallPosition?.(),
+                () => room?.getDiscProperties?.(0),
+            ];
+            for (const getBall of getters) {
+                const ball = getBall();
+                if (Number.isFinite(ball?.x) && Number.isFinite(ball?.y)) return { x: ball.x, y: ball.y };
+            }
         } catch { /* The game bridge is not always ready during room transitions. */ }
     }
     return null;
 };
+
+let canvasBallMotionAt = 0;
+let canvasBallTrackingResetAt = 0;
+const resetCanvasBallTracking = (): void => { canvasBallTrackingResetAt++; };
 
 const createStartLights = (doc: Document, gameframe: HTMLIFrameElement, config: HudConfig): { update: () => void } => {
     const theme = getCombinedScoreboardTheme(config);
@@ -141,6 +154,9 @@ const createStartLights = (doc: Document, gameframe: HTMLIFrameElement, config: 
     let greenUntil = 0;
     let previousTimer = readGameTimerSeconds(doc);
     let previousBallPosition = readBallPosition(gameframe);
+    resetCanvasBallTracking();
+    let previousCanvasBallMotionAt = canvasBallMotionAt;
+    let gameStoppedByMessage = false;
     if (previousTimer !== null && previousTimer > 0) {
         phase = "off";
         root.style.display = "none";
@@ -158,19 +174,38 @@ const createStartLights = (doc: Document, gameframe: HTMLIFrameElement, config: 
     };
     render();
 
+    const chatLog = doc.querySelector<HTMLElement>(".chatbox-view-contents .log .log-contents");
+    if (chatLog) {
+        startLightsStopObserver?.disconnect();
+        startLightsStopObserver = new MutationObserver(mutations => {
+            const addedText = mutations.flatMap(mutation => Array.from(mutation.addedNodes))
+                .map(node => node.textContent || "").join(" ");
+            if (/game\s+(?:has\s+been\s+)?(?:stopped|paused)|(?:partida|juego)\s+(?:detenid[ao]|parad[ao]|pausad[ao])|jogo\s+(?:parado|pausado)/i.test(addedText)) {
+                gameStoppedByMessage = true;
+            }
+        });
+        startLightsStopObserver.observe(chatLog, { childList: true, subtree: true, characterData: true });
+    }
+
     return {
         update: () => {
             const timer = readGameTimerSeconds(doc);
             const ballPosition = readBallPosition(gameframe);
             const ballMoved = !!ballPosition && !!previousBallPosition
-                && Math.hypot(ballPosition.x - previousBallPosition.x, ballPosition.y - previousBallPosition.y) > 2;
+                && Math.hypot(ballPosition.x - previousBallPosition.x, ballPosition.y - previousBallPosition.y) > 0.25;
+            const canvasBallMoved = canvasBallMotionAt > previousCanvasBallMotionAt;
             const timerStarted = timer !== null && previousTimer !== null && timer !== previousTimer;
             const timerAppearedRunning = timer !== null && previousTimer === null && timer > 0;
+            const timerReset = timer === 0 && previousTimer !== null && previousTimer > 0;
 
-            if (phase === "off" && timer === 0 && previousTimer !== null && previousTimer > 0) {
+            if (gameStoppedByMessage || timerReset) {
+                gameStoppedByMessage = false;
                 phase = "ready";
+                greenUntil = 0;
+                resetCanvasBallTracking();
+                previousCanvasBallMotionAt = canvasBallMotionAt;
                 render();
-            } else if (phase === "ready" && (timerStarted || timerAppearedRunning || ballMoved)) {
+            } else if (phase === "ready" && (timerStarted || timerAppearedRunning || ballMoved || canvasBallMoved)) {
                 phase = "green";
                 greenUntil = performance.now() + 5000;
                 render();
@@ -181,6 +216,7 @@ const createStartLights = (doc: Document, gameframe: HTMLIFrameElement, config: 
 
             previousTimer = timer;
             previousBallPosition = ballPosition || previousBallPosition;
+            previousCanvasBallMotionAt = canvasBallMotionAt;
         },
     };
 };
@@ -396,6 +432,10 @@ export const removeRacingHud = (): void => {
     removeKeyListeners?.();
     if (speedPoller !== null) window.clearInterval(speedPoller);
     speedPoller = null;
+    if (startLightsPoller !== null) window.clearInterval(startLightsPoller);
+    startLightsPoller = null;
+    startLightsStopObserver?.disconnect();
+    startLightsStopObserver = null;
 };
 
 const readConfig = async (): Promise<HudConfig> => {
@@ -546,6 +586,11 @@ const installCanvasSpeedReader = (gameframe: HTMLIFrameElement): void => {
     type Candidate = { x: number; y: number; score: number; area: number };
     let candidates: Candidate[] = [];
     let frameReadQueued = false;
+    type BallCandidate = { x: number; y: number; radius: number; score: number; area: number };
+    let ballCandidates: BallCandidate[] = [];
+    let ballFrameReadQueued = false;
+    let previousBallCanvasPoint: { x: number; y: number; radius: number } | null = null;
+    let seenBallTrackingResetAt = canvasBallTrackingResetAt;
     let previous: { x: number; y: number; time: number } | null = null;
     let smoothedSpeed: number | null = null;
     const recentSpeeds: number[] = [];
@@ -637,10 +682,47 @@ const installCanvasSpeedReader = (gameframe: HTMLIFrameElement): void => {
         });
     };
 
+    const recordBall = (context: CanvasRenderingContext2D, x: number, y: number, radius: number): void => {
+        const canvas = context.canvas;
+        if (canvas.width < 400 || canvas.height < 250 || radius < 2 || radius >= 8) return;
+        const rect = canvas.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const transform = context.getTransform();
+        const pointX = transform.a * x + transform.c * y + transform.e;
+        const pointY = transform.b * x + transform.d * y + transform.f;
+        const screenX = pointX * rect.width / canvas.width;
+        const screenY = pointY * rect.height / canvas.height;
+        const dx = (screenX - rect.width / 2) / rect.width;
+        const dy = (screenY - rect.height / 2) / rect.height;
+        const continuity = previousBallCanvasPoint
+            ? Math.hypot(x - previousBallCanvasPoint.x, y - previousBallCanvasPoint.y) * 0.05
+            : 0;
+        const centerBias = previousBallCanvasPoint ? 0 : dx * dx + dy * dy;
+        ballCandidates.push({ x, y, radius, score: centerBias + Math.abs(radius - 5) * 0.001 + continuity, area: canvas.width * canvas.height });
+        if (ballFrameReadQueued) return;
+        ballFrameReadQueued = true;
+        requestFrame(() => {
+            ballFrameReadQueued = false;
+            if (seenBallTrackingResetAt !== canvasBallTrackingResetAt) {
+                seenBallTrackingResetAt = canvasBallTrackingResetAt;
+                previousBallCanvasPoint = null;
+                ballCandidates = [];
+            }
+            const target = ballCandidates.sort((a, b) => a.score - b.score || b.area - a.area)[0];
+            ballCandidates = [];
+            if (!target) return;
+            if (previousBallCanvasPoint && Math.hypot(target.x - previousBallCanvasPoint.x, target.y - previousBallCanvasPoint.y) > 0.25) {
+                canvasBallMotionAt = frameWindow.performance.now();
+            }
+            previousBallCanvasPoint = { x: target.x, y: target.y, radius: target.radius };
+        });
+    };
+
     const prototype = CanvasContext.prototype;
     const originalArc = prototype.arc;
     prototype.arc = function (this: CanvasRenderingContext2D, x, y, radius, ...rest) {
         try { recordDisc(this, x, y, radius); } catch { /* Ignore canvases without a usable transform. */ }
+        try { recordBall(this, x, y, radius); } catch { /* Ignore canvases without a usable transform. */ }
         return originalArc.call(this, x, y, radius, ...rest);
     };
 
@@ -650,6 +732,7 @@ const installCanvasSpeedReader = (gameframe: HTMLIFrameElement): void => {
             try {
                 const radius = (Math.abs(radiusX) + Math.abs(radiusY)) / 2;
                 if (Math.abs(radiusX - radiusY) < 2) recordDisc(this, x, y, radius);
+                if (Math.abs(radiusX - radiusY) < 2) recordBall(this, x, y, radius);
             } catch { /* Ignore canvases without a usable transform. */ }
             return originalEllipse.call(this, x, y, radiusX, radiusY, rotation, startAngle, endAngle, counterclockwise);
         };
@@ -1079,6 +1162,8 @@ export const setupRacingHud = async (): Promise<void> => {
     const keyIndicator = createKeyIndicator(doc, config);
     if (keyIndicator) doc.body.appendChild(keyIndicator);
     const startLights = createStartLights(doc, gameframe, config);
+    if (startLightsPoller !== null) window.clearInterval(startLightsPoller);
+    startLightsPoller = window.setInterval(startLights.update, 25);
     avoidOverlayCollisions(doc, config);
 
     let dragging = false;
@@ -1123,7 +1208,6 @@ export const setupRacingHud = async (): Promise<void> => {
     applyScoreboardAppearance(doc, config);
     speedPoller = window.setInterval(() => {
         if (!root.isConnected) return;
-        startLights.update();
         applyScoreboardAppearance(doc, config);
         avoidOverlayCollisions(doc, config);
         const rawSpeed = config.showSpeed || config.showGear ? readPlayerSpeed(gameframe) : null;
