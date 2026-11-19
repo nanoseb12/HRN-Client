@@ -1,356 +1,217 @@
 import { customAlert } from "../alerts";
-import { Profile, profileManage } from "../profiles";
+import { profileManage, Profile } from "../profiles";
 import { openSettingsAlert } from "../settings";
 import { openUnifiedHaxballSettings } from "../gameview";
-import { waitForElement } from "../waitForElement";
 import { URL } from "../constants";
+import { applyRacingThemeTokens, DashboardStyle } from "../racingTheme";
+
+const SIDEBAR_WIDTH = 228;
+let sidebar: HTMLElement | null = null;
+let gameframe: HTMLIFrameElement | null = null;
+let frameStyleBeforeMenu: Record<string, string> | null = null;
+let sidebarVisible = false;
 
 const aboutAlert = (): void => {
-    customAlert(
-        "Acerca de Haxracing",
-        `Cliente comunitario de HaxBall enfocado en carreras. Mantiene el juego original y añade herramientas para la comunidad Haxracing.
+	customAlert(
+		"Acerca de Haxracing",
+		`Cliente comunitario de HaxBall enfocado en carreras. Mantiene el juego original y añade herramientas para la comunidad Haxracing.
 
-        Está basado en el cliente de código abierto de <a target="_blank" href="https://github.com/oghb/haxball-client">oghb</a> y en <a target="_blank" href="https://github.com/xenonsb/Haxball-Room-Extension">HaxBall All-in-one Tool</a>.
+		Está basado en el cliente de código abierto de <a target="_blank" href="https://github.com/oghb/haxball-client">oghb</a> y en <a target="_blank" href="https://github.com/xenonsb/Haxball-Room-Extension">HaxBall All-in-one Tool</a>.
 
-        <b>HaxBall Client · GPL-3.0</b>`,
-        []
-    );
-}
+		<b>HaxBall Client · GPL-3.0</b>`,
+		[]
+	);
+};
 
 export const helpAlert = (): void => {
-    const officialWebsiteButton = document.createElement('button');
-    officialWebsiteButton.innerText = 'Abrir HaxBall';
-    officialWebsiteButton.onclick = () => {
-        window.open(URL.website, "_blank");
-    };
+	const websiteButton = document.createElement("button");
+	websiteButton.textContent = "Abrir HaxBall";
+	websiteButton.onclick = () => window.open(URL.website, "_blank");
+	const communityButton = document.createElement("button");
+	communityButton.textContent = "Comunidad";
+	communityButton.onclick = () => window.open(URL.discord, "_blank");
+	customAlert("Ayuda", "Abre HaxBall o visita la comunidad para encontrar información y soporte.", [websiteButton, communityButton]);
+};
 
-    const discordButton = document.createElement('button');
-    discordButton.innerText = 'Comunidad';
-    discordButton.onclick = () => {
-        window.open(URL.discord, "_blank");
-    };
+const button = (label: string, icon: string, onClick: () => void, primary = false): HTMLButtonElement => {
+	const item = document.createElement("button");
+	item.type = "button";
+	item.className = `hrn-sidebar-action${primary ? " primary" : ""}`;
+	item.innerHTML = `<span class="hrn-sidebar-icon" aria-hidden="true">${icon}</span><span>${label}</span>`;
+	item.addEventListener("click", onClick);
+	return item;
+};
 
-    customAlert(
-        "Ayuda",
-        `Abre HaxBall o visita la comunidad para encontrar información y soporte.
-        `,
-        [officialWebsiteButton, discordButton]
-    )
-}
-
-
-export const addAddressBarToHeader = (): void => {
-    const centerContainer = document.getElementsByClassName("center-container")[0];
-    if (!centerContainer) return;
-
-    centerContainer.innerHTML = "";
-
-    const addressInput = document.createElement("input");
-    addressInput.type = "text";
-    addressInput.placeholder = "Pega un enlace de sala";
-    addressInput.classList.add("address-bar-input");
-
-    // Base styles
-    addressInput.style.backgroundColor = "#10191e";
-    addressInput.style.color = "white";
-    addressInput.style.border = "1px solid #31504b";
-    addressInput.style.borderRadius = "6px";
-    addressInput.style.padding = "2px 6px";
-    addressInput.style.width = "200px";
-    addressInput.style.maxWidth = "100%";
-    addressInput.style.boxSizing = "border-box";
-    addressInput.style.fontSize = "16px";
-    addressInput.style.outline = "none";
-    addressInput.style.transition = "width 0.4s ease, border-color 0.3s ease, box-shadow 0.3s ease";
-    addressInput.style.textAlign = "center";
-
-    // Focus effect
-    addressInput.addEventListener("focus", () => {
-        addressInput.style.width = "100%";
-        addressInput.style.border = "2px solid #39c7a3";
-        addressInput.style.boxShadow = "0 0 8px rgba(57, 199, 163, 0.25)";
-    });
-
-    // Blur effect
-    addressInput.addEventListener("blur", () => {
-		if (addressInput.value === "") {
-			addressInput.style.width = "200px";
-		}
-        addressInput.style.border = "1px solid #31504b";
-		addressInput.style.boxShadow = "none";
+const nativeClick = (labels: string[]): boolean => {
+	const doc = gameframe?.contentDocument;
+	if (!doc) return false;
+	const normalizedLabels = labels.map(label => label.toLocaleLowerCase());
+	const visible = Array.from(doc.querySelectorAll<HTMLElement>("button,a,[role='button'],[data-hook]"))
+		.filter(element => element.getClientRects().length > 0 && getComputedStyle(element).visibility !== "hidden");
+	const target = visible.find(element => {
+		const text = (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim().toLocaleLowerCase();
+		const hook = (element.dataset.hook || "").toLocaleLowerCase();
+		return normalizedLabels.includes(text) || normalizedLabels.includes(hook);
 	});
+	if (!target) return false;
+	target.click();
+	return true;
+};
 
-	addressInput.addEventListener("input", () => {
-		const roomLink = addressInput.value.trim();
-		const isValid = /^https:\/\/www\.haxball\.com\/play\?c=.{11}$/.test(roomLink);
-	
-		if (roomLink === "") {
-			// Reset to default color when empty
-			addressInput.style.color = "white";
-		} else if (isValid) {
-			addressInput.style.color = "white"; // Valid input stays white
-		} else {
-			addressInput.style.color = "rgba(179, 65, 59, 0.8)"; // Invalid = red text
-		}
+const saveFrameStyle = (frame: HTMLIFrameElement): Record<string, string> => ({
+	position: frame.style.getPropertyValue("position"),
+	top: frame.style.getPropertyValue("top"),
+	left: frame.style.getPropertyValue("left"),
+	right: frame.style.getPropertyValue("right"),
+	bottom: frame.style.getPropertyValue("bottom"),
+	width: frame.style.getPropertyValue("width"),
+	height: frame.style.getPropertyValue("height"),
+	maxWidth: frame.style.getPropertyValue("max-width"),
+	zIndex: frame.style.getPropertyValue("z-index"),
+});
+
+const restoreFrameStyle = (frame: HTMLIFrameElement): void => {
+	if (!frameStyleBeforeMenu) return;
+	const cssNames: Record<string, string> = { maxWidth: "max-width", zIndex: "z-index" };
+	Object.entries(frameStyleBeforeMenu).forEach(([key, value]) => {
+		const property = cssNames[key] || key;
+		if (value) frame.style.setProperty(property, value);
+		else frame.style.removeProperty(property);
 	});
+};
 
-    // Shake animation (CSS keyframes)
-    const style = document.createElement("style");
-    style.innerHTML = `
-        @keyframes shake {
-            0% { transform: translateX(0); }
-            25% { transform: translateX(-4px); }
-            50% { transform: translateX(4px); }
-            75% { transform: translateX(-4px); }
-            100% { transform: translateX(0); }
-        }
-        .shake {
-            animation: shake 0.3s ease;
-        }
-    `;
-    document.head.appendChild(style);
-
-    // Append the input
-    centerContainer.appendChild(addressInput);
-
-    // Expose a global function to trigger shake (for validation error)
-    (window as any).triggerInvalidInput = (input: string) => {
-        addressInput.placeholder = "Enlace inválido"
-		addressInput.value = "";
-		// Inject a <style> tag dynamically
-		const style = document.createElement("style");
-		style.textContent = `
-			.address-bar-input::placeholder {
-            color: #f08e86 !important;
-				opacity: 0.8;
-			}
-		`;
-		document.head.appendChild(style);
-        addressInput.classList.add("shake");
-        setTimeout(() => {
-            addressInput.placeholder = "Pega un enlace de sala"
-			addressInput.value = input;
-            addressInput.classList.remove("shake");
-			document.head.removeChild(style);
-        }, 600);
-    };
-
-	addressInput.addEventListener("keydown", (e) => {
-		if (e.key === "Enter") {
-			e.preventDefault(); // prevent form submission / default action
-			const roomLink = addressInput.value.trim();
-			const isValid = /^https:\/\/www\.haxball\.com\/play\?c=.{11}$/.test(roomLink);
-	
-			if (isValid) {
-                addressInput.value = ""
-                addressInput.placeholder = "Entrando a la sala…"
-				setTimeout(() => {
-                    window.location.href = roomLink;
-                }, 1000)
-			} else {
-				(window as any).triggerInvalidInput(roomLink);
-			}
-		}
-	});
+export const setMenuSidebarVisible = (visible: boolean): void => {
+	if (!sidebar || !gameframe) return;
+	if (visible) {
+		if (!sidebarVisible) frameStyleBeforeMenu = saveFrameStyle(gameframe);
+		sidebar.style.display = "flex";
+		gameframe.style.setProperty("position", "fixed", "important");
+		gameframe.style.setProperty("top", "0", "important");
+		gameframe.style.setProperty("left", `${SIDEBAR_WIDTH}px`, "important");
+		gameframe.style.setProperty("right", "0", "important");
+		gameframe.style.setProperty("bottom", "0", "important");
+		gameframe.style.setProperty("width", `calc(100vw - ${SIDEBAR_WIDTH}px)`, "important");
+		gameframe.style.setProperty("height", "100vh", "important");
+		gameframe.style.setProperty("max-width", "none", "important");
+		gameframe.style.setProperty("z-index", "1", "important");
+		document.body.classList.add("hrn-menu-mode");
+		sidebarVisible = true;
+	} else {
+		if (!sidebarVisible) return;
+		sidebar.style.display = "none";
+		restoreFrameStyle(gameframe);
+		document.body.classList.remove("hrn-menu-mode");
+		sidebarVisible = false;
+	}
 };
 
 export const setupCustomHeader = async (): Promise<void> => {
-    const targetElement = await waitForElement(
-        "body > div > div.flexCol.flexGrow > div",
-        false
-    );
-
-    if (!document.getElementById('font-awesome-4')) {
-        const fa = document.createElement('link');
-        fa.id = 'font-awesome-4';
-        fa.rel = 'stylesheet';
-        fa.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css';
-        document.head.appendChild(fa);
-    }
-
-    if (!document.getElementById('haxracing-theme')) {
-        const theme = document.createElement('style');
-        theme.id = 'haxracing-theme';
-        theme.textContent = `
-            .header { box-sizing: border-box !important; background: linear-gradient(90deg,#10191e,#17272a) !important; border-bottom: 1px solid #29443f !important; box-shadow: 0 5px 18px #0005 !important; padding: 0 12px !important; min-height: 0 !important; }
-            .header .left-container { gap: 10px !important; min-width: 0 !important; overflow: hidden !important; }
-            .header .center-container, .header .right-container { min-width: 0 !important; }
-            .header .right-container .title { max-width: 100% !important; overflow: hidden !important; }
-            .header .right-container .title a { display: block !important; overflow: hidden !important; text-overflow: ellipsis !important; white-space: nowrap !important; }
-            .header .title a, .header .left-container > a, .header .right-container a { color: #d9e8e5 !important; text-decoration: none !important; font-size: 12px !important; transition: color .15s ease; }
-            .header .title a { color: #65daba !important; font-size: 14px !important; font-weight: 800 !important; letter-spacing: .04em; }
-            .header .left-container > a:hover, .header .right-container a:hover { color: #65daba !important; }
-            .header .right-container .title { padding: 5px 11px; border: 1px solid #34534d; border-radius: 999px; background: #1b2b2c; }
-            .header .center-container input { background: #10191e !important; color: #e9f4f1 !important; border: 1px solid #31504b !important; border-radius: 8px !important; }
-            #header-toggle-arrow { border: 1px solid #34534d !important; background: #162326 !important; color: #d9e8e5 !important; }
-        `;
-        document.head.appendChild(theme);
-    }
-
-    const header = document.getElementsByClassName("header")[0] as HTMLElement;
-    header.innerHTML = ""; // clear old header
-
-    // 🆕 Use CSS Grid to split into 3 equal sections
-    header.style.display = "grid";
-    header.style.gridTemplateColumns = "minmax(0, 1fr) minmax(180px, 1fr) minmax(0, 1fr)";
-    header.style.alignItems = "center";
-    header.style.width = "100%";
-
-    const leftContainer = document.createElement("div");
-    leftContainer.classList.add("left-container");
-    leftContainer.style.display = "flex";
-    leftContainer.style.alignItems = "center";
-    leftContainer.style.justifyContent = "flex-start";
-
-    const centerContainer = document.createElement("div");
-    centerContainer.classList.add("center-container");
-    centerContainer.style.display = "flex";
-    centerContainer.style.alignItems = "center";
-    centerContainer.style.justifyContent = "center";
-
-    const rightContainer = document.createElement("div");
-    rightContainer.classList.add("right-container");
-    rightContainer.style.display = "flex";
-    rightContainer.style.alignItems = "center";
-    rightContainer.style.justifyContent = "flex-end";
-    rightContainer.style.overflow = "hidden";
-    
-
-    // Create the new elements
-    const titleSpan = document.createElement("span");
-    titleSpan.classList.add("title");
-    const titleLink = document.createElement("a");
-    // titleLink.href = "https://www.haxball.com/play";
-    titleLink.textContent = "🏁 HAXRACING";
-    titleSpan.appendChild(titleLink);
-
-    const about = document.createElement("a");
-    about.textContent = "Acerca de";
-    about.href = "";
-    about.style.marginLeft = "15px";
-    about.addEventListener("click", function (event) {
-        event.preventDefault(); // Prevent the link from navigating
-        aboutAlert();
-    });
-
-    const help = document.createElement("a");
-    help.textContent = "Ayuda";
-    help.href = "";
-    help.style.marginLeft = "15px";
-    help.addEventListener("click", function (event) {
-        event.preventDefault(); // Prevent the link from navigating
-        helpAlert();
-    });
-
-    const preferences = document.createElement("a");
-    preferences.textContent = "Ajustes";
-    preferences.href = "";
-    preferences.style.marginLeft = "15px";
-    preferences.addEventListener("click", function (event) {
-        event.preventDefault(); // Prevent the link from navigating
-        if (!openUnifiedHaxballSettings()) void openSettingsAlert();
-    });
-
-    leftContainer.appendChild(titleSpan);
-    leftContainer.appendChild(about);
-    leftContainer.appendChild(help);
-    leftContainer.appendChild(preferences);
-
-    const currentProfileId = localStorage.getItem("current_profile") || "default";
-    localStorage.setItem("current_profile", currentProfileId)
-    const prefs = await window.electronAPI.getAppPreferences();
-    const currentProfile = prefs["profiles"]
-        .find((p: Profile) => p.id === currentProfileId);
-    const currentProfileName = (currentProfile !== undefined) 
-        ? currentProfile.name 
-        : "(unknown)"
-    
-    const currentProfileEl = document.createElement("span");
-    currentProfileEl.classList.add("title"); // same style as the title
-    currentProfileEl.style.marginLeft = "15px";
-    const currentProfileElLink = document.createElement("a");
-    currentProfileElLink.href = "";
-    currentProfileElLink.textContent = `👤 ${currentProfileName}`;
-    currentProfileEl.appendChild(currentProfileElLink);
-
-    currentProfileEl.addEventListener("click", function (event) {
-        event.preventDefault();
-        profileManage();
-    });
-    rightContainer.appendChild(currentProfileEl);
-
-    // Append all containers to the header
-    header.appendChild(leftContainer);
-    header.appendChild(centerContainer);
-    header.appendChild(rightContainer);
-
-    localStorage.setItem("header_visible", "true")
-
-    const gameframe = document.getElementsByClassName('gameframe')[0] as HTMLIFrameElement;
-    gameframe.contentWindow.addEventListener("keydown", (e) => {
-        if (e.key.toLowerCase() === "h") {
-            toggleHeaderVisibility();
-        }
-    });
-};
-
-export const toggleHeaderVisibility = (): void => {
-    const header = document.getElementsByClassName("header")[0] as HTMLElement;
-    if (!header) return;
-    const existingArrow = document.getElementById("header-toggle-arrow");
-
-    header.style.setProperty('transition', 'height 0.2s ease, min-height 0.2s ease');
-    header.style.setProperty('overflow', 'hidden');
-    const isVisible = localStorage.getItem("header_visible") !== "false";
-
-    if (!isVisible) {
-        localStorage.setItem("header_visible", "true");
-        header.style.setProperty('min-height', '40px', 'important');
-        header.style.setProperty('height', '40px', 'important');
-        header.style.setProperty('opacity', '1');
-        header.style.setProperty('pointer-events', 'auto');
-        existingArrow?.remove();
-    } else {
-        localStorage.setItem("header_visible", "false");
-        header.style.setProperty('min-height', '0', 'important');
-        header.style.setProperty('height', '0px', 'important');
-        header.style.setProperty('opacity', '0');
-        header.style.setProperty('pointer-events', 'none');
-
-        if (!existingArrow) {
-            const arrow = document.createElement("div");
-            arrow.id = "header-toggle-arrow";
-            arrow.textContent = "⌄ Mostrar barra";
-        
-            arrow.style.background = "rgba(16, 25, 30, 0.94)";
-            arrow.style.padding = "6px 10px";
-            arrow.style.borderRadius = "0 0 8px 0";
-            arrow.style.fontSize = "12px";
-            arrow.style.color = "white";
-            arrow.style.opacity = "0.8";
-            arrow.style.cursor = "pointer";
-            arrow.style.userSelect = "none";
-        
-            arrow.style.position = "fixed";
-            arrow.style.top = "0";
-            arrow.style.left = "0";
-            arrow.style.zIndex = "9999";
-            arrow.style.pointerEvents = "auto";
-        
-            // Optional hover effect
-            arrow.addEventListener("mouseenter", () => {
-                arrow.style.opacity = "1";
-            });
-            arrow.addEventListener("mouseleave", () => {
-                arrow.style.opacity = "0.8";
-            });
-        
-            arrow.addEventListener("click", (event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                toggleHeaderVisibility();
-            });
-            document.body.appendChild(arrow);
-        }
-    }
+	gameframe = document.querySelector<HTMLIFrameElement>(".gameframe");
+	if (!gameframe || !document.body) return;
+	document.querySelector<HTMLElement>(".header")?.setAttribute("hidden", "true");
+	document.getElementById("hrn-sidebar-theme")?.remove();
+	const style = document.createElement("style");
+	style.id = "hrn-sidebar-theme";
+	style.textContent = `
+		#hrn-sidebar{position:fixed;inset:0 auto 0 0;z-index:10000;width:${SIDEBAR_WIDTH}px;box-sizing:border-box;display:flex;flex-direction:column;padding:22px 15px 16px;background:linear-gradient(160deg,var(--hrn-panel) 0%,var(--hrn-bg) 70%,var(--hrn-card) 100%);border-right:1px solid var(--hrn-line);box-shadow:12px 0 38px #0005;color:var(--hrn-text);font:14px/1.35 Inter,"Segoe UI",sans-serif;}
+		#hrn-sidebar:before{content:"";position:absolute;inset:0 auto 0 0;width:3px;background:linear-gradient(180deg,var(--hrn-accent),var(--hrn-gold) 70%,transparent);opacity:.9}
+		#hrn-sidebar .hrn-brand{display:flex;align-items:center;gap:11px;padding:4px 7px 26px;border-bottom:1px solid var(--hrn-line)}
+		#hrn-sidebar .hrn-brand-mark{width:42px;height:42px;display:grid;place-items:center;border:1px solid var(--hrn-accent);border-radius:12px;background:linear-gradient(145deg,var(--hrn-accent-dark),var(--hrn-card));color:var(--hrn-accent);font-size:15px;font-weight:900;letter-spacing:-.08em;box-shadow:0 0 24px var(--hrn-accent-soft)}
+		#hrn-sidebar .hrn-brand-name{font-size:15px;font-weight:850;letter-spacing:.13em;color:#f4faf7}
+		#hrn-sidebar .hrn-brand-sub{margin-top:3px;color:#8ca39f;font-size:9px;font-weight:700;letter-spacing:.22em}
+		#hrn-sidebar .hrn-sidebar-caption{margin:24px 10px 9px;color:var(--hrn-muted);font-size:9px;font-weight:800;letter-spacing:.2em;text-transform:uppercase}
+		#hrn-sidebar .hrn-sidebar-nav{display:grid;gap:5px}
+		#hrn-sidebar .hrn-sidebar-action{width:100%;min-height:43px;display:flex;align-items:center;gap:12px;padding:8px 11px;border:1px solid transparent;border-radius:9px;background:transparent;color:var(--hrn-text);opacity:.78;text-align:left;font:650 13px/1.2 Inter,"Segoe UI",sans-serif;cursor:pointer;transition:background .15s,border-color .15s,color .15s,transform .15s}
+		#hrn-sidebar .hrn-sidebar-action:hover{background:var(--hrn-card-2);border-color:var(--hrn-line);color:var(--hrn-text);opacity:1;transform:translateX(2px)}
+		#hrn-sidebar .hrn-sidebar-action.active{background:linear-gradient(90deg,var(--hrn-accent-dark),var(--hrn-card));border-color:var(--hrn-border);color:var(--hrn-accent);opacity:1}
+		#hrn-sidebar .hrn-sidebar-icon{width:20px;color:var(--hrn-accent);font-size:15px;text-align:center}
+		#hrn-sidebar .hrn-sidebar-join{margin:18px 3px 0;padding:12px;border:1px solid var(--hrn-line);border-radius:11px;background:var(--hrn-panel)}
+		#hrn-sidebar .hrn-sidebar-join-title{margin:0 0 8px;color:var(--hrn-muted);font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+		#hrn-sidebar input{width:100%;height:36px;box-sizing:border-box;padding:0 9px;border:1px solid var(--hrn-line);border-radius:7px;background:var(--hrn-bg);color:var(--hrn-text);font:12px Inter,"Segoe UI",sans-serif;outline:none}
+		#hrn-sidebar input:focus{border-color:var(--hrn-accent);box-shadow:0 0 0 3px var(--hrn-accent-soft)}
+		#hrn-sidebar input::placeholder{color:var(--hrn-muted)}
+		#hrn-sidebar .hrn-join-button{margin-top:7px;justify-content:center;background:var(--hrn-accent-dark);color:var(--hrn-accent);border-color:var(--hrn-border)}
+		#hrn-sidebar .hrn-join-button:hover{background:var(--hrn-card-2)}
+		#hrn-sidebar .hrn-sidebar-spacer{flex:1}
+		#hrn-sidebar .hrn-profile-card{display:flex;align-items:center;gap:10px;margin:12px 3px;padding:11px 9px;border:1px solid var(--hrn-line);border-radius:10px;background:var(--hrn-panel);cursor:pointer}
+		#hrn-sidebar .hrn-profile-mark{width:31px;height:31px;display:grid;place-items:center;border-radius:50%;background:var(--hrn-accent-dark);color:var(--hrn-accent);font-weight:800}
+		#hrn-sidebar .hrn-profile-name{display:block;overflow:hidden;color:var(--hrn-text);font-size:12px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+		#hrn-sidebar .hrn-profile-label{display:block;margin-top:2px;color:var(--hrn-muted);font-size:9px;letter-spacing:.08em;text-transform:uppercase}
+		#hrn-sidebar .hrn-sidebar-footer{display:grid;gap:5px;padding-top:10px;border-top:1px solid var(--hrn-line)}
+		#hrn-sidebar .hrn-settings-button{background:linear-gradient(100deg,var(--hrn-accent-dark),var(--hrn-card))!important;border-color:var(--hrn-border)!important;color:var(--hrn-accent)!important}
+		#hrn-sidebar .hrn-settings-button .hrn-sidebar-icon{color:var(--hrn-accent)}
+		#hrn-sidebar .hrn-version{padding:9px 8px 0;color:var(--hrn-muted);font-size:9px;letter-spacing:.12em;text-align:center}
+		body.hrn-menu-mode{overflow:hidden!important}
+		body.hrn-menu-mode>.header{display:none!important}
+	`;
+	document.head.appendChild(style);
+	document.getElementById("hrn-sidebar")?.remove();
+	sidebar = document.createElement("aside");
+	sidebar.id = "hrn-sidebar";
+	const brand = document.createElement("div");
+	brand.className = "hrn-brand";
+	brand.innerHTML = `<div class="hrn-brand-mark">HR</div><div><div class="hrn-brand-name">HAXRACING</div><div class="hrn-brand-sub">RACE CLIENT</div></div>`;
+	const navCaption = document.createElement("div");
+	navCaption.className = "hrn-sidebar-caption";
+	navCaption.textContent = "Race control";
+	const nav = document.createElement("nav");
+	nav.className = "hrn-sidebar-nav";
+	const roomsButton = button("Salas", "▦", () => {
+		const roomList = gameframe?.contentDocument?.querySelector<HTMLElement>(".roomlist-view");
+		if (!roomList || !roomList.getClientRects().length) nativeClick(["play", "jugar", "jogar", "rooms", "salas"]);
+	}, true);
+	roomsButton.classList.add("active");
+	nav.append(roomsButton, button("Ayuda", "?", helpAlert), button("Acerca de", "i", aboutAlert));
+	const joinBox = document.createElement("div");
+	joinBox.className = "hrn-sidebar-join";
+	const joinTitle = document.createElement("div");
+	joinTitle.className = "hrn-sidebar-join-title";
+	joinTitle.textContent = "Enlace directo";
+	const linkInput = document.createElement("input");
+	linkInput.type = "url";
+	linkInput.placeholder = "Pega un enlace de sala";
+	linkInput.setAttribute("aria-label", "Pega un enlace de sala");
+	const join = (): void => {
+		const raw = linkInput.value.trim();
+		try {
+			const parsed = new globalThis.URL(raw);
+			const roomCode = parsed.searchParams.get("c");
+			if (parsed.hostname !== "www.haxball.com" || parsed.pathname !== "/play" || !roomCode || roomCode.length !== 11) throw new Error();
+			window.location.href = `https://www.haxball.com/play?c=${encodeURIComponent(roomCode)}`;
+		} catch {
+			linkInput.value = "";
+			linkInput.placeholder = "Enlace de sala no válido";
+			window.setTimeout(() => { linkInput.placeholder = "Pega un enlace de sala"; }, 1800);
+		}
+	};
+	linkInput.addEventListener("keydown", event => { if (event.key === "Enter") join(); });
+	const joinButton = button("Entrar a la sala", "↗", join);
+	joinButton.classList.add("hrn-join-button");
+	joinBox.append(joinTitle, linkInput, joinButton);
+	const spacer = document.createElement("div");
+	spacer.className = "hrn-sidebar-spacer";
+	const profileCard = document.createElement("button");
+	profileCard.type = "button";
+	profileCard.className = "hrn-profile-card";
+	profileCard.innerHTML = `<span class="hrn-profile-mark">●</span><span style="min-width:0;text-align:left"><span class="hrn-profile-name">Cargando perfil</span><span class="hrn-profile-label">Perfil activo</span></span>`;
+	profileCard.addEventListener("click", () => profileManage());
+	const footer = document.createElement("div");
+	footer.className = "hrn-sidebar-footer";
+	const settingsButton = button("Ajustes", "⚙", () => {
+		if (!openUnifiedHaxballSettings()) void openSettingsAlert();
+	}, true);
+	settingsButton.classList.add("hrn-settings-button");
+	const version = document.createElement("div");
+	version.className = "hrn-version";
+	version.textContent = "HRN CLIENT · HAXRACING";
+	footer.append(settingsButton, version);
+	sidebar.append(brand, navCaption, nav, joinBox, spacer, profileCard, footer);
+	document.body.appendChild(sidebar);
+	const prefs = await window.electronAPI.getAppPreferences();
+	const currentProfileId = localStorage.getItem("current_profile") || "default";
+	const profile = (prefs.profiles || []).find((item: Profile) => item.id === currentProfileId) || prefs.profiles?.[0];
+	const profileName = profileCard.querySelector<HTMLElement>(".hrn-profile-name");
+	if (profileName) profileName.textContent = profile?.name || "Default";
+	applyRacingThemeTokens(document, ((prefs.hud as { dashboardStyle?: DashboardStyle } | undefined)?.dashboardStyle || "normal"));
+	setMenuSidebarVisible(true);
 };

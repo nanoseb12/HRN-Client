@@ -1,17 +1,18 @@
 import { autoUpdater } from "./autoUpdater"
 import { injectFavoriteRoomsButtons } from "./favrooms";
 import { addTranspUIButton, setGameView, toggleTransparentUI } from "./gameview";
-import { toggleHeaderVisibility } from "./ui/setupCustomHeader";
+import { setMenuSidebarVisible } from "./ui/setupCustomHeader";
 import { applyHaxballMenuTheme, removeRacingHud } from "./hud";
+import { trackHaxballView } from "./stats";
+import { installCustomStartScreen } from "./startScreen";
 
 export const handleGameView = (viewName: string): void => {
+	trackHaxballView(viewName);
+	setMenuSidebarVisible(!viewName.includes("game-view"));
 	void applyHaxballMenuTheme();
 	switch(true) {
 		case viewName === "dropdown":
 			removeRacingHud();
-			if (localStorage.getItem("header_visible") === "false"){
-				toggleHeaderVisibility();
-			}
 			window.electronAPI.updateDiscordRPC("Waiting in the Room List")
 			autoUpdater();
 			break;
@@ -21,17 +22,11 @@ export const handleGameView = (viewName: string): void => {
 			"game-view showing-room-view chat-bg-full", 
 			"game-view showing-room-view"
 		].includes(viewName):
-			if (localStorage.getItem("header_visible") === "true"){
-				toggleHeaderVisibility();
-			}
 			window.electronAPI.updateDiscordRPC("Playing in a Room")
 			setTimeout(setGameView, 200); // improve, don't use timeout
 			break;
 		case viewName === "room-view":
 			removeRacingHud();
-			if (localStorage.getItem("header_visible") === "true"){
-				toggleHeaderVisibility();
-			}
 			addTranspUIButton();
 			toggleTransparentUI();
 			break;
@@ -39,5 +34,12 @@ export const handleGameView = (viewName: string): void => {
 			removeRacingHud();
 			injectFavoriteRoomsButtons();
 			break;
+		case viewName === "choose-nickname-view": {
+			removeRacingHud();
+			const gameframe = document.querySelector<HTMLIFrameElement>(".gameframe");
+			if (gameframe) void installCustomStartScreen(gameframe);
+			window.electronAPI.updateDiscordRPC("Preparing to race");
+			break;
+		}
 	}
 }

@@ -29,7 +29,7 @@ export const loadProfileToLocalStorage = (profileId: string): void => {
             // keys of profile that have a corresponding entry in localstorage
             Object.keys(profile)
             .filter(
-                attr_name => !["id", "name", "autosave"].includes(attr_name)
+                attr_name => !["id", "name", "autosave", "avatar_image"].includes(attr_name)
             )
             .forEach(attr_name => {
                 let attr_val = profile[attr_name]
@@ -47,6 +47,7 @@ export const loadProfileToLocalStorage = (profileId: string): void => {
                     localStorage.setItem(attr_name, attr_val)
                 }
             });
+            localStorage.removeItem("avatar_image");
         })
         .catch(error => {
             console.error('Failed to load settings:', error);
@@ -94,6 +95,7 @@ export const exportCurrentProfile = (): Promise<void> => {
                 }
                 profiles[profileId][attr_name] = attr_value
             });
+            delete (profiles[profileId] as Profile & { avatar_image?: string | null }).avatar_image;
             return window.electronAPI.setAppPreference("profiles", profiles)
         })
         .catch(error => {

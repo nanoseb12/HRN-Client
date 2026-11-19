@@ -29,7 +29,7 @@ const addShortcutListener = async (gameframe: HTMLIFrameElement): Promise<void> 
 const settingsObservedDocuments = new WeakSet<Document>();
 const settingsExtendedDialogs = new WeakSet<HTMLElement>();
 
-const extendHaxballSettingsMenu = (gameframe: HTMLIFrameElement): void => {
+export const installUnifiedHaxballSettingsMenu = (gameframe: HTMLIFrameElement): void => {
 	const doc = gameframe.contentDocument;
 	if (!doc?.body || settingsObservedDocuments.has(doc)) return;
 	settingsObservedDocuments.add(doc);
@@ -62,6 +62,10 @@ const extendHaxballSettingsMenu = (gameframe: HTMLIFrameElement): void => {
 			|| null
 		);
 		settingsExtendedDialogs.add(dialog);
+		dialog.classList.add("hrn-settings-dialog");
+		tabBar.classList.add("hrn-settings-tabs");
+		const tabShell = tabBar.parentElement as HTMLElement | null;
+		(tabShell && tabShell !== dialog ? tabShell : tabBar).classList.add("hrn-settings-tabs-shell");
 		dialog.style.width = "min(760px, 92vw)";
 		dialog.style.maxHeight = "85vh";
 	tabBar.style.display = "flex";
@@ -151,6 +155,7 @@ const extendHaxballSettingsMenu = (gameframe: HTMLIFrameElement): void => {
 			});
 		}, true);
 		const panelHost = nativeSections[0]?.parentElement || nativeFallbackPanel?.parentElement || dialog;
+		panelHost.classList.add("hrn-settings-content");
 		panelHost.appendChild(customPanel);
 		void appendHudSettingsPanel(hudPanel);
 		void openSettingsAlert({ client: appSettings, optimization: optimizationSettings });
@@ -198,6 +203,8 @@ export const toggleTransparentUI = async (): Promise<void> => {
 
     const prefs = await window.electronAPI.getAppPreferences();
     const enable = prefs["transp_ui"];
+    const gameView = gameframe.contentDocument.getElementsByClassName("game-view")[0] as HTMLElement | undefined;
+    gameView?.classList.toggle("hrn-glass-ui", Boolean(enable));
 
     if (enable) {
         // gameframe.contentDocument.getElementsByClassName("game-view chat-bg-full")[0].style.cssText = "--chat-opacity: 0.063;"
@@ -322,7 +329,7 @@ export const setGameView = async (): Promise<void> => {
 		new Error("Gameframe or contentDocument not found");
 		return;
 	}
-	extendHaxballSettingsMenu(gameframe);
+	installUnifiedHaxballSettingsMenu(gameframe);
 	// Mount the HUD first so optional HaxBall UI tweaks cannot prevent it from appearing.
 	await setupRacingHud();
 	addShortcutListener(gameframe);

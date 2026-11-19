@@ -13,6 +13,7 @@ declare global {
 			deletePreferencesFile: () => Promise<any>;
 			getAppVersion: () => Promise<string>;
 			generatePlayerAuthKey: () => Promise<string>;
+			connectDiscordAccount: () => Promise<{ id: string; username: string; avatarUrl: string; linkedAt: string }>;
 			updateDiscordRPC: (details: string) => void;
 		};
 	}

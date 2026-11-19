@@ -6,6 +6,7 @@ import { createButton } from "./utils";
 import { appendHudSettingsPanel } from "./hud";
 import { AppLanguage, getLocalizationLanguage, setLocalizationLanguage } from "./i18n";
 import { openHaxballVideoSettings } from "./gameview";
+import { formatPlayTime, getPlayStats, setPlayStatsAccount } from "./stats";
 
 const createToggleRow = (
 		labelText: string,
@@ -152,6 +153,101 @@ const createLanguageSection = (doc: Document): HTMLElement => {
 	});
 	select.addEventListener("change", () => { void setLocalizationLanguage(select.value as AppLanguage); });
 	section.append(heading, description, select);
+	return section;
+};
+
+type DiscordAccount = { id: string; username: string; avatarUrl: string; linkedAt: string };
+
+const createDiscordAccountSection = (doc: Document, initialAccount: DiscordAccount | null): HTMLElement => {
+	const section = doc.createElement("section");
+	section.style.cssText = "display:grid;gap:8px;margin-bottom:14px;";
+	const heading = doc.createElement("div");
+	heading.textContent = "Cuenta de Discord";
+	heading.style.cssText = "font-size:18px;font-weight:bold;";
+	const description = doc.createElement("div");
+	description.textContent = "Vincula tu cuenta para asociar tus estadísticas locales. HRN usa un token temporal para leer tu perfil y no lo guarda.";
+	description.style.cssText = "font-size:13px;color:#aab9c4;line-height:1.4;";
+	const profileRow = doc.createElement("div");
+	profileRow.style.cssText = "display:flex;align-items:center;gap:10px;min-height:40px;";
+	const avatar = doc.createElement("img");
+	avatar.alt = "Discord avatar";
+	avatar.style.cssText = "width:34px;height:34px;border-radius:50%;object-fit:cover;display:none;";
+	const accountName = doc.createElement("span");
+	accountName.style.cssText = "font-weight:600;";
+	profileRow.append(avatar, accountName);
+	const actions = doc.createElement("div");
+	actions.style.cssText = "display:flex;gap:8px;";
+	const connectButton = createButton("Conectar Discord", "#155e57", "#21786e", async () => {
+		connectButton.disabled = true;
+		connectButton.textContent = "Conectando…";
+		try {
+			const account = await window.electronAPI.connectDiscordAccount();
+			await window.electronAPI.setAppPreference("discord_account", account);
+			setPlayStatsAccount(account.id);
+			showAccount(account);
+		} catch (error) {
+			customAlert("No se pudo conectar Discord", error instanceof Error ? error.message : String(error), []);
+		} finally {
+			connectButton.disabled = false;
+			connectButton.textContent = "Conectar Discord";
+		}
+	});
+	connectButton.style.display = "none";
+	const disconnectButton = createButton("Desconectar", "#713a3a", "#934444", async () => {
+		await window.electronAPI.setAppPreference("discord_account", null);
+		setPlayStatsAccount(null);
+		showAccount(null);
+	});
+	actions.append(connectButton, disconnectButton);
+	const showAccount = (account: DiscordAccount | null): void => {
+		if (account) {
+			avatar.src = account.avatarUrl;
+			avatar.style.display = "block";
+			accountName.textContent = account.username;
+			connectButton.style.display = "none";
+			disconnectButton.style.display = "inline-block";
+		} else {
+			avatar.removeAttribute("src");
+			avatar.style.display = "none";
+			accountName.textContent = "Sin vincular";
+			connectButton.style.display = "inline-block";
+			disconnectButton.style.display = "none";
+		}
+	};
+	showAccount(initialAccount);
+	section.append(heading, description, profileRow, actions);
+	return section;
+};
+
+const createPlayStatsSection = (doc: Document): HTMLElement => {
+	const section = doc.createElement("section");
+	section.style.cssText = "display:grid;gap:7px;margin-bottom:14px;";
+	const heading = doc.createElement("div");
+	heading.textContent = "Estadísticas locales";
+	heading.style.cssText = "font-size:18px;font-weight:bold;";
+	const summary = doc.createElement("div");
+	summary.style.cssText = "font-size:13px;line-height:1.6;color:#d5dfdf;";
+	const stats = getPlayStats();
+	const roomEntries = Object.entries(stats.rooms);
+	const totalConnected = doc.createElement("div");
+	totalConnected.textContent = `Tiempo conectado: ${formatPlayTime(stats.totalMs)}`;
+	const visits = doc.createElement("div");
+	visits.textContent = `Entradas a salas: ${stats.roomEntries}`;
+	const uniqueRooms = doc.createElement("div");
+	uniqueRooms.textContent = `Salas distintas: ${roomEntries.length}`;
+	summary.append(totalConnected, visits, uniqueRooms);
+	const topHeading = doc.createElement("div");
+	topHeading.textContent = "Salas con más tiempo";
+	topHeading.style.cssText = "font-weight:600;margin-top:4px;";
+	const topList = doc.createElement("div");
+	topList.style.cssText = "display:grid;gap:4px;color:#aab9c4;font-size:12px;";
+	roomEntries.sort((a, b) => b[1].timeMs - a[1].timeMs).slice(0, 5).forEach(([, room]) => {
+		const row = doc.createElement("div");
+		row.textContent = `${room.name} · ${room.visits} visitas · ${formatPlayTime(room.timeMs)}`;
+		topList.appendChild(row);
+	});
+	if (!roomEntries.length) topList.textContent = "Las estadísticas aparecerán cuando entres a una sala.";
+	section.append(heading, summary, topHeading, topList);
 	return section;
 };
 
@@ -448,12 +544,17 @@ export const openSettingsAlert = async (embeddedPanels?: EmbeddedSettingsPanels)
 	container.style.overflowY = 'auto';
 	container.style.paddingRight = '8px';
 	const languageSection = createLanguageSection(embeddedPanels?.client.ownerDocument || document);
+	const linkedAccount = (prefs["discord_account"] || null) as DiscordAccount | null;
+	const discordAccountSection = createDiscordAccountSection(embeddedPanels?.client.ownerDocument || document, linkedAccount);
+	const playStatsSection = createPlayStatsSection(embeddedPanels?.client.ownerDocument || document);
 	if (embeddedPanels) {
 		embeddedPanels.optimization.append(cameraSection, generalSection);
-		embeddedPanels.client.append(languageSection, shortcutsSection, authSection, backupSection);
+		embeddedPanels.client.append(languageSection, discordAccountSection, playStatsSection, shortcutsSection, authSection, backupSection);
 		return;
 	}
 	container.appendChild(languageSection);
+	container.appendChild(discordAccountSection);
+	container.appendChild(playStatsSection);
 	container.appendChild(cameraSection);
 	await appendHudSettingsPanel(container);
 	container.appendChild(generalSection);

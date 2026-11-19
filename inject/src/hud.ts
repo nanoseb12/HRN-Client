@@ -1,8 +1,7 @@
 import { createButton } from "./utils";
 import { COMPETITION_LOGOS } from "./scoreboardLogos";
+import { applyRacingThemeTokens, DASHBOARD_THEMES, DASHBOARD_STYLE_LABELS, DashboardStyle, ScoreboardStyle } from "./racingTheme";
 
-type DashboardStyle = "normal" | "f1" | "wec" | "gt3" | "porsche" | "vintage";
-type ScoreboardStyle = "haxball" | "f1" | "f1-vintage" | "wec" | "porsche-cup";
 type OverlayPosition = "default" | "top-left" | "bottom-left" | "bottom-center" | "bottom-right" | "top-right";
 type KeyLayout = "wasd" | "arrows";
 type HudConfig = {
@@ -51,17 +50,6 @@ let speedPoller: number | null = null;
 let readCanvasSpeed: () => number | null = () => null;
 const hookedCanvasPrototypes = new WeakSet<object>();
 const originalScoreboardStyles = new WeakMap<HTMLElement, string>();
-const DASHBOARD_THEMES: Record<DashboardStyle, { accent: string; border: string; background: string; font: string }> = {
-    normal: { accent: "#65daba", border: "#4c6c64", background: "linear-gradient(145deg,rgba(18,29,32,.96),rgba(10,16,18,.94))", font: "Arial,sans-serif" },
-    f1: { accent: "#ff3548", border: "#792631", background: "linear-gradient(145deg,rgba(35,16,21,.97),rgba(12,13,17,.96))", font: "Arial,sans-serif" },
-    wec: { accent: "#55c7ff", border: "#285577", background: "linear-gradient(145deg,rgba(13,31,48,.97),rgba(9,15,23,.96))", font: "Arial,sans-serif" },
-    gt3: { accent: "#ffc857", border: "#755c2e", background: "linear-gradient(145deg,rgba(38,31,16,.97),rgba(15,16,15,.96))", font: "Arial,sans-serif" },
-    porsche: { accent: "#ef5b52", border: "#69332f", background: "linear-gradient(145deg,rgba(32,23,23,.97),rgba(12,13,15,.96))", font: "Arial,sans-serif" },
-    vintage: { accent: "#e3c99a", border: "#8e7653", background: "linear-gradient(145deg,rgba(35,34,31,.98),rgba(18,19,18,.98))", font: "Consolas,'Courier New',monospace" },
-};
-const DASHBOARD_STYLE_LABELS: Record<DashboardStyle, string> = {
-    normal: "Normal", f1: "F1", wec: "WEC", gt3: "GT3", porsche: "Porsche", vintage: "Vintage",
-};
 const SCOREBOARD_STYLE_LABELS: Record<ScoreboardStyle, string> = {
     haxball: "Haxball Racing Series",
     f1: "F1",
@@ -83,6 +71,11 @@ const SCOREBOARD_THEMES: Record<ScoreboardStyle, { accent: string; background: s
     "f1-vintage": { accent: "#d62828", background: "#171717", border: "#a5a5a5", color: "#f7f3e8", font: "'Arial Black',Impact,sans-serif", logo: "f1Vintage" },
     wec: { accent: "#a4d65e", background: "#101b2c", border: "#1d5b9e", color: "#f4f7fb", font: "'Arial Narrow','Roboto Condensed',Arial,sans-serif", logo: "wec" },
     "porsche-cup": { accent: "#b3213b", background: "#17181b", border: "#9da1a6", color: "#f6f3f2", font: "'Arial Narrow',Arial,sans-serif", logo: "porscheCup" },
+};
+const getCombinedScoreboardTheme = (config: HudConfig) => {
+    const competition = SCOREBOARD_THEMES[config.scoreboardStyle];
+    const dashboard = DASHBOARD_THEMES[config.dashboardStyle];
+    return { ...competition, accent: dashboard.accent, border: dashboard.border, background: dashboard.background };
 };
 const SCOREBOARD_POSITION_LABELS: Record<OverlayPosition, string> = {
     ...POSITION_LABELS,
@@ -124,7 +117,7 @@ const readBallPosition = (gameframe: HTMLIFrameElement): { x: number; y: number 
 };
 
 const createStartLights = (doc: Document, gameframe: HTMLIFrameElement, config: HudConfig): { update: () => void } => {
-    const theme = SCOREBOARD_THEMES[config.scoreboardStyle];
+    const theme = getCombinedScoreboardTheme(config);
     const root = doc.createElement("section");
     root.id = "haxracing-start-lights";
     root.setAttribute("aria-live", "polite");
@@ -196,7 +189,7 @@ let removeKeyListeners: (() => void) | null = null;
 
 const createKeyIndicator = (doc: Document, config: HudConfig): HTMLElement | null => {
     if (!config.showKeyIndicator) return null;
-    const theme = SCOREBOARD_THEMES[config.scoreboardStyle];
+    const theme = getCombinedScoreboardTheme(config);
     const root = doc.createElement("div");
     root.id = "haxracing-key-indicator";
     root.setAttribute("aria-label", "Teclas de conducción");
@@ -262,14 +255,71 @@ const createKeyIndicator = (doc: Document, config: HudConfig): HTMLElement | nul
     return root;
 };
 
+const avoidOverlayCollisions = (doc: Document, config: HudConfig): void => {
+    const keyIndicator = doc.getElementById("haxracing-key-indicator") as HTMLElement | null;
+    if (!keyIndicator) return;
+    const view = doc.defaultView;
+    if (!view) return;
+    const width = view.innerWidth;
+    const height = view.innerHeight;
+    const keyWidth = keyIndicator.offsetWidth;
+    const keyHeight = keyIndicator.offsetHeight;
+    const base: Record<OverlayPosition, { left: number; top: number }> = {
+        default: { left: 12, top: 68 },
+        "top-left": { left: 12, top: 12 },
+        "bottom-left": { left: 12, top: height - keyHeight - 12 },
+        "bottom-center": { left: (width - keyWidth) / 2, top: height - keyHeight - 12 },
+        "bottom-right": { left: width - keyWidth - 12, top: height - keyHeight - 12 },
+        "top-right": { left: width - keyWidth - 12, top: 12 },
+    };
+    const blockers = [
+        doc.querySelector<HTMLElement>(".chatbox-view-contents"),
+        doc.getElementById("haxracing-hud"),
+        findScoreboard(doc),
+        doc.querySelector<HTMLElement>(".game-timer-view"),
+        doc.querySelector<HTMLElement>(".game-view>.buttons"),
+        doc.querySelector<HTMLElement>(".sound-button-container"),
+        doc.getElementById("haxracing-start-lights"),
+    ].filter((element): element is HTMLElement => !!element && element.getClientRects().length > 0
+        && view.getComputedStyle(element).display !== "none" && view.getComputedStyle(element).visibility !== "hidden");
+    const collides = (left: number, top: number): boolean => blockers.some(element => {
+        const rect = element.getBoundingClientRect();
+        return left < rect.right + 8 && left + keyWidth > rect.left - 8
+            && top < rect.bottom + 8 && top + keyHeight > rect.top - 8;
+    });
+    const starting = base[config.keyPosition];
+    let left = starting.left;
+    let top = starting.top;
+    if (collides(left, top)) {
+        const chat = blockers.find(element => element.classList.contains("chatbox-view-contents"));
+        const chatRect = chat?.getBoundingClientRect();
+        const candidates = [
+            ...(chatRect ? [{ left: (width - keyWidth) / 2, top: chatRect.top - keyHeight - 12 }] : []),
+            { left: 12, top: 12 },
+            { left: width - keyWidth - 12, top: 12 },
+            { left: 12, top: height - keyHeight - 12 },
+            { left: width - keyWidth - 12, top: height - keyHeight - 12 },
+            { left: 12, top: height / 2 - keyHeight / 2 },
+            { left: width - keyWidth - 12, top: height / 2 - keyHeight / 2 },
+        ].map(point => ({ left: Math.max(8, Math.min(width - keyWidth - 8, point.left)), top: Math.max(8, Math.min(height - keyHeight - 8, point.top)) }));
+        const clearCandidate = candidates.find(point => !collides(point.left, point.top));
+        if (clearCandidate) ({ left, top } = clearCandidate);
+    }
+    keyIndicator.style.left = `${left}px`;
+    keyIndicator.style.top = `${top}px`;
+    keyIndicator.style.right = "auto";
+    keyIndicator.style.bottom = "auto";
+    keyIndicator.style.transform = "none";
+};
+
 const applyScoreboardAppearance = (doc: Document, config: HudConfig): void => {
     const scoreboard = findScoreboard(doc);
     if (!scoreboard) return;
     if (!originalScoreboardStyles.has(scoreboard)) originalScoreboardStyles.set(scoreboard, scoreboard.style.cssText);
 
-    const theme = SCOREBOARD_THEMES[config.scoreboardStyle];
+    const theme = getCombinedScoreboardTheme(config);
     const previousLayout = scoreboard.dataset.haxracingLayout;
-    const layout = `${config.scoreboardStyle}:${config.scoreboardPosition}`;
+    const layout = `${config.dashboardStyle}:${config.scoreboardStyle}:${config.scoreboardPosition}`;
     if (previousLayout === layout) return;
     scoreboard.style.cssText = originalScoreboardStyles.get(scoreboard) || "";
     scoreboard.dataset.haxracingLayout = layout;
@@ -351,11 +401,14 @@ export const removeRacingHud = (): void => {
 const readConfig = async (): Promise<HudConfig> => {
     const prefs = await window.electronAPI.getAppPreferences();
     const saved = prefs.hud as Partial<HudConfig> | undefined;
+    const dashboardStyle = saved?.dashboardStyle && saved.dashboardStyle in DASHBOARD_THEMES
+        ? saved.dashboardStyle
+        : DEFAULT_CONFIG.dashboardStyle;
     return {
         ...DEFAULT_CONFIG,
         ...saved,
-        dashboardStyle: saved?.dashboardStyle && saved.dashboardStyle in DASHBOARD_THEMES ? saved.dashboardStyle : DEFAULT_CONFIG.dashboardStyle,
-        scoreboardStyle: saved?.scoreboardStyle && saved.scoreboardStyle in SCOREBOARD_THEMES ? saved.scoreboardStyle : DEFAULT_CONFIG.scoreboardStyle,
+        dashboardStyle,
+        scoreboardStyle: DASHBOARD_THEMES[dashboardStyle].logoStyle,
         scoreboardPosition: saved?.scoreboardPosition && saved.scoreboardPosition in POSITION_LABELS ? saved.scoreboardPosition : DEFAULT_CONFIG.scoreboardPosition,
         showKeyIndicator: typeof saved?.showKeyIndicator === "boolean" ? saved.showKeyIndicator : DEFAULT_CONFIG.showKeyIndicator,
         keyLayout: saved?.keyLayout === "arrows" ? "arrows" : "wasd",
@@ -373,21 +426,73 @@ export const applyHaxballMenuTheme = async (): Promise<void> => {
     const prefs = await window.electronAPI.getAppPreferences();
     const savedStyle = (prefs.hud as Partial<HudConfig> | undefined)?.dashboardStyle;
     const style = savedStyle && savedStyle in DASHBOARD_THEMES ? savedStyle : DEFAULT_CONFIG.dashboardStyle;
-    const theme = DASHBOARD_THEMES[style];
+    applyRacingThemeTokens(doc, style);
     doc.getElementById("haxracing-haxball-theme")?.remove();
     const menuStyle = doc.createElement("style");
     menuStyle.id = "haxracing-haxball-theme";
-    const panel = style === "vintage" ? "#24231f" : "#10191e";
-    const surface = style === "vintage" ? "#34332d" : "#1a272e";
-    const text = style === "vintage" ? "#e3c99a" : "#edf4f5";
     menuStyle.textContent = `
-      .room-view>.container,.roomlist-view>.container,.room-view .container,.roomlist-view .container,.dialog,.dropdown{background:${panel};color:${text};border:1px solid ${theme.border};border-radius:7px;box-shadow:0 8px 26px #0008}
-      .room-view .player-list-view,.roomlist-view .room-list,.roomlist-view .room-entry,.roomlist-view .room-card{background:${surface};color:${text};border-color:${theme.border}}
-      .room-view button,.roomlist-view button,.dialog button,.dropdown button,.room-view select,.roomlist-view select,.dialog select,.room-view input,.roomlist-view input,.dialog input{background:${surface};color:${text};border:1px solid ${theme.border};border-radius:4px}
-      .room-view button:hover,.roomlist-view button:hover,.dialog button:hover,.dropdown button:hover{border-color:${theme.accent};box-shadow:0 0 8px ${theme.accent}55}
-      .game-view>.buttons button,.game-view>.buttons .sound-button-container>*{border-color:${theme.border};color:${text}}
-      .room-view .player-list-view,.roomlist-view .room-entry,.roomlist-view .room-card{transition:border-color .15s ease,background .15s ease}
-      .room-view .player-list-view:hover,.roomlist-view .room-entry:hover,.roomlist-view .room-card:hover{border-color:${theme.accent}}
+      html,body{background:var(--hrn-bg)!important;color:var(--hrn-text)!important}
+      .dropdown,.roomlist-view,.room-view,.choose-nickname-view{box-sizing:border-box;color:var(--hrn-text)!important;background:radial-gradient(ellipse at 50% 0%,var(--hrn-panel) 0%,var(--hrn-bg) 66%)!important;font-family:Inter,"Segoe UI",sans-serif!important}
+      .dropdown>.container,.roomlist-view>.container,.room-view>.container{box-sizing:border-box!important;width:min(1120px,calc(100vw - 48px))!important;max-width:1120px!important;margin:28px auto!important;padding:24px!important;color:var(--hrn-text)!important;background:var(--hrn-dashboard-background)!important;border:1px solid var(--hrn-line)!important;border-top:2px solid var(--hrn-accent)!important;border-radius:14px!important;box-shadow:0 22px 70px #0008!important}
+      .choose-nickname-view>.container,.choose-nickname-view .container{box-sizing:border-box!important;width:min(460px,calc(100vw - 36px))!important;max-width:calc(100vw - 36px)!important;padding:22px!important;color:var(--hrn-text)!important;background:var(--hrn-dashboard-background)!important;border:1px solid var(--hrn-line)!important;border-top:2px solid var(--hrn-accent)!important;border-radius:12px!important;box-shadow:0 22px 70px #000a!important}
+      .room-view .container,.roomlist-view .container{color:var(--hrn-text)!important}
+      .room-view .player-list-view,.roomlist-view .room-list,.roomlist-view [data-hook="list"],.roomlist-view .room-entry,.roomlist-view .room-card{color:var(--hrn-text)!important;background:var(--hrn-card)!important;border-color:var(--hrn-line)!important;border-radius:9px!important}
+      .roomlist-view>.container{width:min(1180px,calc(100vw - 48px))!important;max-width:1180px!important;padding:clamp(18px,3vw,34px)!important}
+      .roomlist-view .splitter{box-sizing:border-box!important;display:grid!important;grid-template-columns:minmax(0,1fr) 205px!important;align-items:start!important;gap:18px!important;width:100%!important}
+      .roomlist-view .splitter>.buttons{display:grid!important;grid-template-columns:minmax(0,1fr)!important;align-content:start!important;gap:8px!important;min-width:0!important;padding:0!important;border:0!important;background:transparent!important}
+      .roomlist-view .splitter>.buttons>button{display:flex!important;align-items:center!important;justify-content:flex-start!important;width:100%!important;min-width:0!important;min-height:42px!important;padding:8px 12px!important;border-left:2px solid var(--hrn-accent)!important;border-radius:5px!important;background:linear-gradient(100deg,var(--hrn-card),rgba(8,12,14,.78))!important;color:var(--hrn-text)!important;text-align:left!important;letter-spacing:.02em!important}
+      .roomlist-view [data-hook="list"]{overflow:auto!important;scrollbar-color:var(--hrn-line) var(--hrn-bg)!important;background:transparent!important;border:0!important;border-radius:0!important}
+      .roomlist-view table{width:100%!important;min-width:520px!important;border-collapse:separate!important;border-spacing:0 5px!important}
+      .roomlist-view th{padding:10px 12px!important;background:var(--hrn-panel)!important;color:var(--hrn-muted)!important;font-size:9px!important;font-weight:800!important;letter-spacing:.13em!important;text-align:left!important;text-transform:uppercase!important}
+      .roomlist-view td{padding:10px 12px!important;border-top:1px solid transparent!important;border-bottom:1px solid transparent!important;background:var(--hrn-card)!important;color:var(--hrn-text)!important;font-size:12px!important}
+      .roomlist-view tr:hover td{border-color:var(--hrn-line)!important;background:var(--hrn-card-2)!important}
+      .roomlist-view tr.selected td{border-color:var(--hrn-accent)!important;background:var(--hrn-accent-dark)!important}
+      .roomlist-view .splitter>.buttons #addfav-btn,.roomlist-view .splitter>.buttons #showfav-btn{border-left-color:var(--hrn-gold)!important}
+      .roomlist-view [data-hook="list"]>*,.roomlist-view .room-entry,.roomlist-view .room-card{transition:background .15s ease,border-color .15s ease,transform .15s ease}
+      .roomlist-view [data-hook="list"]>*:hover,.roomlist-view .room-entry:hover,.roomlist-view .room-card:hover{background:var(--hrn-card-2)!important;border-color:var(--hrn-accent)!important}
+      .room-view button,.roomlist-view button,.dialog button,.dropdown button,.choose-nickname-view button,.room-view select,.roomlist-view select,.dialog select,.room-view input,.roomlist-view input,.dialog input,.dialog textarea,.choose-nickname-view input{box-sizing:border-box!important;color:var(--hrn-text)!important;background:var(--hrn-card)!important;border:1px solid var(--hrn-line)!important;border-radius:7px!important;transition:border-color .15s ease,background .15s ease,box-shadow .15s ease}
+      .room-view button,.roomlist-view button,.dialog button,.dropdown button,.choose-nickname-view button{min-height:34px!important;padding:6px 12px!important;font-weight:650!important;cursor:pointer!important}
+      .room-view button:hover,.roomlist-view button:hover,.dialog button:hover,.dropdown button:hover,.choose-nickname-view button:hover{background:var(--hrn-card-2)!important;border-color:var(--hrn-accent)!important;box-shadow:0 0 0 2px var(--hrn-accent-soft)!important}
+      .room-view button.selected,.roomlist-view button.selected,.dialog button.selected,.dialog .selected{color:#d8fff1!important;background:var(--hrn-accent-dark)!important;border-color:var(--hrn-accent)!important}
+      .room-view input,.roomlist-view input,.dialog input,.dialog textarea,.room-view select,.roomlist-view select,.dialog select{min-height:34px!important;padding:7px 10px!important;outline:none!important}
+      .room-view input:focus,.roomlist-view input:focus,.dialog input:focus,.dialog textarea:focus,.room-view select:focus,.roomlist-view select:focus,.dialog select:focus{border-color:var(--hrn-accent)!important;box-shadow:0 0 0 3px #55d6ad20!important}
+      .room-view input::placeholder,.roomlist-view input::placeholder,.dialog input::placeholder{color:#7f9292!important}
+      .dialog{box-sizing:border-box!important;width:min(760px,94vw)!important;min-width:min(620px,92vw)!important;max-width:94vw!important;max-height:88vh!important;overflow:auto!important;padding:20px!important;color:var(--hrn-text)!important;background:linear-gradient(145deg,var(--hrn-panel),var(--hrn-bg) 72%)!important;border:1px solid var(--hrn-line)!important;border-left:3px solid var(--hrn-accent)!important;border-radius:6px!important;box-shadow:0 28px 90px #000b!important}
+      .dialog .section,.dialog [data-haxracing-settings-section]{box-sizing:border-box!important;color:var(--hrn-text)!important;background:var(--hrn-panel)!important;border-color:var(--hrn-line)!important}
+      .dialog h1,.dialog h2,.dialog h3,.room-view h1,.room-view h2,.roomlist-view h1,.roomlist-view h2{color:var(--hrn-text)!important;letter-spacing:.015em}
+      .dialog label,.room-view label,.roomlist-view label{color:#c4d2cf!important}
+      .room-view a,.roomlist-view a,.dialog a{color:var(--hrn-accent)!important}
+      .dropdown a,.dropdown button{color:var(--hrn-text)!important}
+      .choose-nickname-view h1,.choose-nickname-view h2,.choose-nickname-view h3,.choose-nickname-view label{color:var(--hrn-text)!important}
+      .room-view table,.roomlist-view table{border-collapse:separate!important;border-spacing:0 5px!important}
+      .room-view td,.roomlist-view td,.room-view th,.roomlist-view th{padding:8px 10px!important;border-color:var(--hrn-line)!important}
+      .room-view tr,.roomlist-view tr{background:var(--hrn-card)!important}
+      .room-view tr:hover,.roomlist-view tr:hover{background:var(--hrn-card-2)!important}
+      .dialog button[data-hook="close"],.dialog [data-hook="close"]{border-color:#3a4644!important}
+      .dialog.hrn-settings-dialog{width:min(900px,94vw)!important;min-width:min(680px,92vw)!important;padding:24px!important;border-radius:6px!important;border-top:1px solid var(--hrn-line)!important;border-left:3px solid var(--hrn-accent)!important;background:linear-gradient(145deg,var(--hrn-panel),var(--hrn-bg) 72%)!important}
+      .hrn-settings-tabs-shell{margin:0 0 14px!important;padding:4px!important;border:1px solid var(--hrn-line)!important;border-radius:5px!important;background:rgba(0,0,0,.2)!important}
+      .hrn-settings-tabs{display:flex!important;flex-wrap:wrap!important;gap:5px!important}
+      .hrn-settings-tabs button{min-width:90px!important;min-height:35px!important;border-radius:3px!important;background:transparent!important;color:var(--hrn-muted)!important;font-size:9px!important;font-weight:850!important;letter-spacing:.12em!important;text-transform:uppercase!important}
+      .hrn-settings-tabs button.selected{background:var(--hrn-accent)!important;color:#101416!important;border-color:var(--hrn-accent)!important;box-shadow:0 2px 12px var(--hrn-accent-soft)!important}
+      .hrn-settings-content>.section,.hrn-settings-dialog>.section,.hrn-settings-content>.haxracing-settings-panel{padding:14px!important;border:1px solid var(--hrn-line)!important;border-radius:5px!important;background:rgba(0,0,0,.17)!important}
+      .haxracing-settings-panel{scrollbar-color:#35564f #10191c}
+      .game-view{font-family:Inter,"Segoe UI",sans-serif!important}
+      .game-state-view .bar{background:transparent!important}
+      .game-state-view .game-timer-view{box-sizing:border-box!important;display:flex!important;align-items:center!important;justify-content:center!important;min-width:112px!important;min-height:36px!important;padding:0 15px!important;border:1px solid var(--hrn-line)!important;border-top:0!important;border-radius:0 0 8px 8px!important;background:linear-gradient(180deg,var(--hrn-panel),var(--hrn-bg))!important;color:var(--hrn-text)!important;font:800 15px/1 Inter,"Segoe UI",sans-serif!important;font-variant-numeric:tabular-nums!important;letter-spacing:.08em!important;box-shadow:0 7px 22px #0007,inset 0 -2px var(--hrn-accent)!important}
+      .game-view>.buttons{box-sizing:border-box!important;display:flex!important;align-items:center!important;gap:5px!important;padding:5px!important;border:1px solid var(--hrn-line)!important;border-radius:9px!important;background:rgba(9,13,15,.82)!important;box-shadow:0 8px 24px #0006!important;backdrop-filter:blur(10px)!important}
+      .game-view>.buttons button,.game-view .header-btns button,.game-view .sound-button-container button{box-sizing:border-box!important;min-width:34px!important;min-height:32px!important;padding:5px 9px!important;border:1px solid var(--hrn-line)!important;border-radius:6px!important;background:var(--hrn-card)!important;color:var(--hrn-text)!important;font:700 11px Inter,"Segoe UI",sans-serif!important;box-shadow:none!important;transition:background .15s,border-color .15s,transform .15s!important}
+      .game-view>.buttons button:hover,.game-view .header-btns button:hover,.game-view .sound-button-container button:hover{background:var(--hrn-card-2)!important;border-color:var(--hrn-accent)!important;transform:translateY(-1px)!important}
+      .game-view .sound-button-container{display:flex!important;gap:5px!important;padding:4px!important;border:1px solid var(--hrn-line)!important;border-radius:8px!important;background:rgba(9,13,15,.76)!important;box-shadow:0 6px 20px #0005!important;backdrop-filter:blur(8px)!important}
+      .game-view .chatbox-view-contents{box-sizing:border-box!important;border:1px solid var(--hrn-line)!important;border-radius:9px 9px 0 0!important;background:linear-gradient(180deg,rgba(9,13,15,.86),rgba(9,13,15,.72))!important;color:var(--hrn-text)!important;box-shadow:0 -8px 28px #0003!important;backdrop-filter:blur(10px)!important;overflow:hidden!important}
+      .game-view .chatbox-view-contents .log .log-contents{box-sizing:border-box!important;padding:8px 10px!important;color:var(--hrn-text)!important;font:12px/1.45 Inter,"Segoe UI",sans-serif!important;text-shadow:0 1px 2px #0008!important;scrollbar-color:var(--hrn-line) var(--hrn-bg)!important}
+      .game-view .chatbox-view-contents .log .log-contents p{margin:2px 0!important;color:var(--hrn-text)!important}
+      .game-view .chatbox-view-contents>.input{box-sizing:border-box!important;padding:6px!important;border-top:1px solid var(--hrn-line)!important;background:rgba(9,13,15,.92)!important}
+      .game-view .chatbox-view-contents>.input input[type=text]{box-sizing:border-box!important;min-height:34px!important;padding:6px 10px!important;border:1px solid var(--hrn-line)!important;border-radius:6px!important;outline:none!important;background:var(--hrn-card)!important;color:var(--hrn-text)!important;font:12px Inter,"Segoe UI",sans-serif!important}
+      .game-view .chatbox-view-contents>.input input[type=text]:focus{border-color:var(--hrn-accent)!important;box-shadow:0 0 0 3px var(--hrn-accent-soft)!important}
+      .game-view.hrn-glass-ui>.buttons,.game-view.hrn-glass-ui .sound-button-container,.game-view.hrn-glass-ui .chatbox-view-contents,.game-view.hrn-glass-ui .chatbox-view-contents>.input{background:rgba(9,13,15,.2)!important;backdrop-filter:blur(3px)!important}
+      .game-view.hrn-glass-ui .chatbox-view-contents>.input input[type=text]{background:rgba(9,13,15,.2)!important}
+      @media(max-width:760px){.roomlist-view .splitter{grid-template-columns:minmax(0,1fr)!important}.roomlist-view .splitter>.buttons{grid-template-columns:repeat(2,minmax(0,1fr))!important}.dialog.hrn-settings-dialog{width:96vw!important;min-width:0!important}.hrn-settings-tabs button{flex:1 1 90px!important}}
+      @media(max-width:700px){.dropdown>.container,.roomlist-view>.container,.room-view>.container{width:calc(100vw - 20px)!important;margin:10px auto!important;padding:14px!important}.dialog{padding:14px!important}}
     `;
     doc.head.appendChild(menuStyle);
 };
@@ -658,7 +763,7 @@ export const appendHudSettingsPanel = async (parent: HTMLElement): Promise<void>
     };
 
     const dashboardStyleLabel = document.createElement("label");
-    dashboardStyleLabel.textContent = "Estilo del dashboard";
+    dashboardStyleLabel.textContent = "Tema unificado del dashboard y marcador";
     dashboardStyleLabel.style.display = "grid";
     dashboardStyleLabel.style.gap = "6px";
     const dashboardStyleSelect = document.createElement("select");
@@ -674,7 +779,10 @@ export const appendHudSettingsPanel = async (parent: HTMLElement): Promise<void>
     dashboardStyleLabel.appendChild(dashboardStyleSelect);
     form.appendChild(dashboardStyleLabel);
 
-    const scoreboardStyleSelect = addSelect("Estilo del marcador", "scoreboardStyle", config.scoreboardStyle, SCOREBOARD_STYLE_LABELS);
+    const themeDescription = document.createElement("small");
+    themeDescription.textContent = "Este tema coordina el HUD, el marcador, el logotipo y los colores de los menús.";
+    themeDescription.style.cssText = "color:#91a5a5;font-size:12px;line-height:1.4;";
+    dashboardStyleLabel.appendChild(themeDescription);
     const scoreboardPositionSelect = addSelect("Posición del marcador", "scoreboardPosition", config.scoreboardPosition, SCOREBOARD_POSITION_LABELS);
     const keyLayoutSelect = addSelect("Teclas que se muestran", "keyLayout", config.keyLayout, { wasd: "WASD", arrows: "Flechas" });
     const keyPositionSelect = addSelect("Posición de las teclas", "keyPosition", config.keyPosition, KEY_POSITION_LABELS);
@@ -852,13 +960,16 @@ export const appendHudSettingsPanel = async (parent: HTMLElement): Promise<void>
         }
         next.gearPercentages = percentages;
         next.dashboardStyle = dashboardStyleSelect.value as DashboardStyle;
-        next.scoreboardStyle = scoreboardStyleSelect.value as ScoreboardStyle;
+        next.scoreboardStyle = DASHBOARD_THEMES[next.dashboardStyle].logoStyle;
         next.scoreboardPosition = scoreboardPositionSelect.value as OverlayPosition;
         next.keyLayout = keyLayoutSelect.value as KeyLayout;
         next.keyPosition = keyPositionSelect.value as OverlayPosition;
         const prefs = await window.electronAPI.getAppPreferences();
         const position = prefs.hud || config;
         await window.electronAPI.setAppPreference("hud", { ...next, left: position.left, top: position.top });
+        applyRacingThemeTokens(document, next.dashboardStyle);
+        const frame = document.querySelector<HTMLIFrameElement>(".gameframe");
+        if (frame?.contentDocument) applyRacingThemeTokens(frame.contentDocument, next.dashboardStyle);
         void setupRacingHud();
     });
     form.appendChild(save);
@@ -870,10 +981,17 @@ export const setupRacingHud = async (): Promise<void> => {
     const gameframe = document.getElementsByClassName("gameframe")[0] as HTMLIFrameElement;
     const doc = gameframe?.contentDocument;
     if (!doc?.body) return;
+    const config = await readConfig();
+    applyRacingThemeTokens(document, config.dashboardStyle);
+    const activeGameView = Array.from(doc.querySelectorAll<HTMLElement>(".game-view"))
+        .some(view => view.getClientRects().length > 0 && doc.defaultView?.getComputedStyle(view).display !== "none");
+    if (!activeGameView) {
+        void applyHaxballMenuTheme();
+        return;
+    }
     installCanvasSpeedReader(gameframe);
 
     removeRacingHud();
-    const config = await readConfig();
     void applyHaxballMenuTheme();
     const state: { lap: string; lastLap: string; previousSpeedKmh: number | null; trend: "up" | "down" | "steady" } = {
         lap: "", lastLap: "", previousSpeedKmh: null, trend: "steady",
@@ -961,6 +1079,7 @@ export const setupRacingHud = async (): Promise<void> => {
     const keyIndicator = createKeyIndicator(doc, config);
     if (keyIndicator) doc.body.appendChild(keyIndicator);
     const startLights = createStartLights(doc, gameframe, config);
+    avoidOverlayCollisions(doc, config);
 
     let dragging = false;
     let offsetX = 0;
@@ -1006,6 +1125,7 @@ export const setupRacingHud = async (): Promise<void> => {
         if (!root.isConnected) return;
         startLights.update();
         applyScoreboardAppearance(doc, config);
+        avoidOverlayCollisions(doc, config);
         const rawSpeed = config.showSpeed || config.showGear ? readPlayerSpeed(gameframe) : null;
         updateHud(root, config, state, rawSpeed);
     }, 100);

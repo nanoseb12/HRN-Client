@@ -11,5 +11,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deletePreferencesFile: () => ipcRenderer.invoke('delete-preferences-file'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   generatePlayerAuthKey: () => ipcRenderer.invoke('generate-player-auth-key'),
+  connectDiscordAccount: () => ipcRenderer.invoke('connect-discord-account'),
   updateDiscordRPC: (details) => ipcRenderer.send('update-discord-rpc', details)
 });

@@ -4,11 +4,15 @@ const fs = require('fs');
 const { URL } = require('url');
 const { z } = require('zod');
 const { version } = require('./package.json');
-const { generateKeyPairSync } = require('crypto');
+const { generateKeyPairSync, randomBytes } = require('crypto');
+const http = require('http');
+const https = require('https');
 const DiscordRPC = require ("discord-rpc");
 
 let win;
 const rpcClientId = "1391027232352501841";
+const discordOAuthClientId = "1572737824070041620";
+const discordOAuthRedirectUri = "http://127.0.0.1:43127/callback";
 const rpc = new DiscordRPC.Client({ transport: 'ipc' });
 rpc.on('ready', () => {
 	console.log('Discord RPC ready');
@@ -44,6 +48,12 @@ const validatePreferences = (prefs) => {
       shortcuts: z.array(z.tuple([z.string(), z.string()])),
       profiles: z.array(ProfileSchema),
       discord_rpc: z.boolean().optional(),
+      discord_account: z.object({
+        id: z.string(),
+        username: z.string(),
+        avatarUrl: z.string().url(),
+        linkedAt: z.string()
+      }).nullable().optional(),
       camera_zoom: z.number().min(0.1).max(2).optional()
   });
 
@@ -64,6 +74,27 @@ const saveAppPreferences = (prefs) => {
     console.error('Error saving app preferences:', error);
   }
 }
+
+const requestDiscordJson = (url, options = {}) => new Promise((resolve, reject) => {
+  const request = https.request(url, {
+    method: options.method || 'GET',
+    headers: options.headers || {},
+  }, response => {
+    const chunks = [];
+    response.on('data', chunk => chunks.push(chunk));
+    response.on('end', () => {
+      try {
+        resolve({ status: response.statusCode || 0, data: JSON.parse(Buffer.concat(chunks).toString('utf8')) });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+  request.on('error', reject);
+  request.setTimeout(15000, () => request.destroy(new Error('Discord request timed out.')));
+  if (options.body) request.write(options.body);
+  request.end();
+});
 
 const loadAppPreferences = () => {
   const userDataPath = app.getPath('userData')
@@ -123,7 +154,7 @@ const createWindow = () => {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false
     },
-    title: "HaxBall Client by og"
+    title: "HRN Client · Haxracing"
   });
   
   const extensionPath = path.join(path.dirname(__dirname), 'app.asar.unpacked', 'inject', 'Haxball-Room-Extension');
@@ -326,11 +357,111 @@ ipcMain.handle('generate-player-auth-key', async (event) => {
   return idkey
 })
 
+ipcMain.handle('connect-discord-account', async () => {
+  const state = randomBytes(24).toString('hex');
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (error, profile) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (server.listening) server.close();
+      if (error) reject(error);
+      else resolve(profile);
+    };
+    const server = http.createServer(async (request, response) => {
+      if (request.method === 'GET' && request.url?.split('?')[0] === '/callback') {
+        response.writeHead(200, {
+          'Content-Type': 'text/html; charset=utf-8',
+          'Cache-Control': 'no-store',
+          'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; connect-src 'self'; style-src 'unsafe-inline'",
+        }).end(`<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer"><title>HRN - Discord</title><main style="font:16px sans-serif;margin:3em auto;max-width:36em"><h2 id="title">Conectando Discord con HRN…</h2><p id="message">Puedes cerrar esta pestaña cuando termine.</p></main><script>
+          (async () => {
+            const params = new URLSearchParams(location.hash.slice(1));
+            const payload = {
+              accessToken: params.get('access_token'),
+              state: params.get('state'),
+              issuer: params.get('iss'),
+              error: params.get('error_description') || params.get('error')
+            };
+            history.replaceState(null, '', location.pathname);
+            try {
+              const result = await fetch('/oauth-callback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+              const data = await result.json();
+              if (!result.ok) throw new Error(data.error || 'No se pudo validar la autorización.');
+              document.getElementById('title').textContent = 'Discord conectado';
+              document.getElementById('message').textContent = 'Vuelve a HRN Client. Ya puedes cerrar esta pestaña.';
+            } catch (error) {
+              document.getElementById('title').textContent = 'No se pudo conectar Discord';
+              document.getElementById('message').textContent = error.message;
+            }
+          })();
+        </script>`);
+        return;
+      }
+      if (request.method !== 'POST' || request.url !== '/oauth-callback') {
+        response.writeHead(404).end('Not found');
+        return;
+      }
+      try {
+        let rawBody = '';
+        for await (const chunk of request) {
+          rawBody += chunk;
+          if (rawBody.length > 8192) throw new Error('La respuesta de Discord excede el tamaño permitido.');
+        }
+        const authResult = JSON.parse(rawBody);
+        if (authResult.state !== state) throw new Error('Discord OAuth state mismatch');
+        if (authResult.issuer !== 'https://discord.com') throw new Error('Unexpected Discord OAuth issuer');
+        if (authResult.error) throw new Error(String(authResult.error));
+        if (typeof authResult.accessToken !== 'string' || authResult.accessToken.length > 8192) {
+          throw new Error('Discord no devolvió un token de acceso válido.');
+        }
+        const profileResponse = await requestDiscordJson('https://discord.com/api/v10/users/@me', {
+          headers: { Authorization: `Bearer ${authResult.accessToken}` },
+        });
+        if (profileResponse.status < 200 || profileResponse.status >= 300 || !profileResponse.data?.id) {
+          throw new Error('Discord no pudo validar el perfil autorizado.');
+        }
+        const user = profileResponse.data;
+        const avatarUrl = user.avatar
+          ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.${user.avatar.startsWith('a_') ? 'gif' : 'png'}?size=256`
+          : `https://cdn.discordapp.com/embed/avatars/${Number(user.discriminator || 0) % 6}.png`;
+        const profile = {
+          id: user.id,
+          username: String(user.global_name || user.username || 'Discord'),
+          avatarUrl,
+          linkedAt: new Date().toISOString(),
+        };
+        response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ success: true }));
+        finish(null, profile);
+      } catch (error) {
+        response.writeHead(400, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }).end(JSON.stringify({ error: error instanceof Error ? error.message : 'Error de autorización.' }));
+        finish(error);
+      }
+    });
+
+    const timeout = setTimeout(() => finish(new Error('Se agotó el tiempo para conectar Discord.')), 180000);
+    server.on('error', error => finish(error));
+    server.listen(43127, '127.0.0.1', () => {
+      const authorizeUrl = new URL('https://discord.com/oauth2/authorize');
+      authorizeUrl.search = new URLSearchParams({
+        client_id: discordOAuthClientId,
+        response_type: 'token',
+        redirect_uri: discordOAuthRedirectUri,
+        scope: 'identify',
+        state,
+      }).toString();
+      shell.openExternal(authorizeUrl.toString()).catch(error => finish(error));
+    });
+  });
+});
+
 ipcMain.on('update-discord-rpc', (_event, details) => {
   const activity = {
     details: details,
     largeImageKey: 'client-logo',
-    largeImageText: 'HaxBall Client by og',
+    largeImageText: 'HRN Client · Haxracing',
     startTimestamp: Date.now(),
     buttons: [
       {

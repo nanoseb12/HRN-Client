@@ -4,6 +4,7 @@ import { setupUIElements } from "./ui/setupUIElements"
 import { handleGameView } from "./handleview";
 import { exportCurrentProfile, loadProfileToLocalStorage, Profile } from "./profiles";
 import { attachLocalization, initializeLocalization } from "./i18n";
+import { setPlayStatsAccount } from "./stats";
 
 async function init() {    
     // remove ads, modify header, add command bar
@@ -12,6 +13,7 @@ async function init() {
 
     // load profile
     const preferences = await window.electronAPI.getAppPreferences()
+    setPlayStatsAccount(preferences.discord_account?.id || null);
     const profiles: Array<Profile> = preferences["profiles"]
     const currentProfileId = localStorage.getItem("current_profile") || "default"
     const currentProfile = profiles.find(p => p.id === currentProfileId) 
@@ -50,7 +52,7 @@ async function init() {
         gameframe.addEventListener("load", () => attachLocalization(gameframe.contentDocument));
         let lastRoutedView = "";
         const routeCurrentView = (): void => {
-            const selectors = [".game-view", ".room-view", ".roomlist-view", ".dropdown"];
+            const selectors = [".game-view", ".room-view", ".roomlist-view", ".dropdown", ".choose-nickname-view"];
             const active = selectors
                 .flatMap(selector => Array.from(frameDocument.querySelectorAll<HTMLElement>(selector)))
                 .find(element => {
